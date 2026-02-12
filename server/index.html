@@ -428,6 +428,20 @@
             to { transform: rotate(360deg); }
         }
 
+
+
+        /* Desktop Chart Defaults */
+        .chart-scroll-wrapper {
+            width: 100%;
+            height: 400px; /* Fixed height for desktop */
+            position: relative;
+        }
+
+        .chart-scroll-wrapper canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
         /* Mobile Responsive Improvements */
         @media (max-width: 768px) {
             .header {
