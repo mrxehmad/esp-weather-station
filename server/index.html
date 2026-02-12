@@ -4,8 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Temperature Monitor</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://file.ehmi.se/Guest/cdn/chart.js"></script>
     <style>
+        :root {
+            /* Light Theme Variables */
+            --bg-color: #f5f5f7;
+            --card-bg: #ffffff;
+            --text-main: #1d1d1f;
+            --text-sub: #86868b;
+            --border-color: #d2d2d7;
+            --accent-color: #0071e3;
+            --accent-bg: rgba(0, 113, 227, 0.1);
+            --success-color: #34c759;
+            --success-bg: rgba(52, 199, 89, 0.1);
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            --header-bg: rgba(255, 255, 255, 0.8);
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                /* Dark Theme Variables */
+                --bg-color: #0f1115;
+                --card-bg: #1a1d24;
+                --text-main: #f5f5f7;
+                --text-sub: #a1a1a6;
+                --border-color: #2c2c2e;
+                --accent-color: #0a84ff;
+                --accent-bg: rgba(10, 132, 255, 0.15);
+                --success-color: #30d158;
+                --success-bg: rgba(48, 209, 88, 0.15);
+                --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                --header-bg: rgba(26, 29, 36, 0.8);
+                --hover-bg: rgba(255, 255, 255, 0.05);
+            }
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,686 +47,997 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-            background: #f5f5f7;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
             min-height: 100vh;
             padding: 20px;
-            color: #1d1d1f;
+            transition: background-color 0.3s, color 0.3s;
         }
 
         .container {
             max-width: 1400px;
             margin: 0 auto;
+            padding-bottom: 80px;
         }
 
+        /* Header */
         .header {
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 48px;
-            font-weight: 600;
-            letter-spacing: -0.5px;
-            margin-bottom: 8px;
-        }
-
-        .header p {
-            font-size: 19px;
-            color: #6e6e73;
-            font-weight: 400;
-        }
-
-        .tabs {
             display: flex;
-            gap: 12px;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 30px;
-            border-bottom: 1px solid #d2d2d7;
-            padding-bottom: 0;
+            padding: 20px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(20px);
         }
 
-        .tab {
-            padding: 12px 20px;
-            background: none;
-            border: none;
-            font-size: 17px;
+        .station-info h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: var(--success-color);
+            background: var(--success-bg);
+            padding: 6px 12px;
+            border-radius: 20px;
             font-weight: 500;
-            color: #6e6e73;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: currentColor;
+            border-radius: 50%;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .last-update {
+            font-size: 13px;
+            color: var(--text-sub);
+        }
+
+        /* Navigation */
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            background: var(--card-bg);
+            padding: 6px;
+            border-radius: 12px;
+            width: fit-content;
+            box-shadow: var(--shadow);
+        }
+
+        .nav-tab {
+            padding: 10px 24px;
+            border: none;
+            background: transparent;
+            color: var(--text-sub);
+            font-size: 15px;
+            font-weight: 500;
+            border-radius: 8px;
             cursor: pointer;
-            position: relative;
-            transition: color 0.2s;
+            transition: all 0.2s;
         }
 
-        .tab:hover {
-            color: #1d1d1f;
+        .nav-tab:hover {
+            color: var(--text-main);
+            background: var(--hover-bg);
         }
 
-        .tab.active {
-            color: #0071e3;
+        .nav-tab.active {
+            background: var(--accent-color);
+            color: white;
+            box-shadow: 0 2px 8px rgba(0, 113, 227, 0.3);
         }
 
-        .tab.active::after {
-            content: '';
-            position: absolute;
-            bottom: -1px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: #0071e3;
-        }
-
+        /* Content Sections */
         .tab-content {
             display: none;
+            animation: fadeIn 0.3s ease;
         }
 
         .tab-content.active {
             display: block;
         }
 
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Hero Section */
+        .hero-section {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 24px;
+            margin-bottom: 24px;
+            align-items: end;
+        }
+
+        .current-temp-card {
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .temp-display {
+            font-size: 72px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -2px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--text-main), var(--text-sub));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .temp-unit {
+            font-size: 32px;
+            font-weight: 500;
+            vertical-align: super;
+            margin-left: 4px;
+        }
+
+        .trend-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 15px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: var(--bg-color);
+            color: var(--text-sub);
+        }
+
+        .trend-up { color: #ff3b30; }
+        .trend-down { color: #0071e3; }
+
+        /* Time Range Selector */
+        .time-range-selector {
+            background: var(--card-bg);
+            padding: 6px;
+            border-radius: 12px;
+            display: flex;
+            gap: 4px;
+            box-shadow: var(--shadow);
+            height: fit-content;
+        }
+
+        .range-btn {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-sub);
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .range-btn:hover {
+            color: var(--text-main);
+            background: var(--hover-bg);
+        }
+
+        .range-btn.active {
+            background: var(--bg-color);
+            color: var(--accent-color);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        /* Charts */
+        .chart-card {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+            border: 1px solid var(--border-color);
+        }
+
+        .chart-header {
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
         }
 
         .stat-card {
-            background: white;
-            border-radius: 12px;
+            background: var(--card-bg);
             padding: 24px;
-            border: 1px solid #d2d2d7;
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
         }
 
         .stat-label {
             font-size: 13px;
-            color: #6e6e73;
+            color: var(--text-sub);
             margin-bottom: 8px;
-            font-weight: 500;
-            letter-spacing: -0.08px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
         }
 
         .stat-value {
             font-size: 32px;
-            font-weight: 600;
-            color: #1d1d1f;
-            letter-spacing: -0.5px;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -1px;
         }
 
         .stat-unit {
-            font-size: 17px;
-            color: #86868b;
+            font-size: 16px;
+            color: var(--text-sub);
+            font-weight: 500;
             margin-left: 4px;
         }
 
-        .chart-container {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            border: 1px solid #d2d2d7;
-            margin-bottom: 30px;
+        /* User Table */
+        .table-container {
+            overflow-x: auto;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
         }
 
-        .chart-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            white-space: nowrap;
         }
 
-        .chart-title {
-            font-size: 24px;
+        th {
+            text-align: left;
+            padding: 16px 24px;
+            color: var(--text-sub);
+            font-size: 13px;
             font-weight: 600;
-            letter-spacing: -0.3px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-color);
         }
 
-        .time-filter {
-            display: flex;
-            gap: 8px;
-            background: #f5f5f7;
-            padding: 4px;
-            border-radius: 8px;
+        td {
+            padding: 16px 24px;
+            color: var(--text-main);
+            font-size: 15px;
+            border-bottom: 1px solid var(--border-color);
         }
 
-        .time-btn {
-            padding: 6px 14px;
-            border: none;
-            background: transparent;
-            color: #1d1d1f;
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background: var(--hover-bg);
+        }
+
+        .user-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
             border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s;
+            background: var(--bg-color);
+            font-size: 13px;
+            color: var(--text-sub);
         }
 
-        .time-btn:hover {
-            background: rgba(0, 0, 0, 0.05);
+        .user-badge.has-data {
+            background: var(--accent-bg);
+            color: var(--accent-color);
         }
 
-        .time-btn.active {
-            background: white;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
-
-        .refresh-btn {
+        /* Buttons */
+        .refresh-fab {
             position: fixed;
             bottom: 30px;
             right: 30px;
-            background: #0071e3;
-            color: white;
-            border: none;
-            border-radius: 50%;
             width: 56px;
             height: 56px;
-            font-size: 24px;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
-            transition: all 0.2s;
-        }
-
-        .refresh-btn:hover {
-            transform: scale(1.05);
-            box-shadow: 0 6px 16px rgba(0, 113, 227, 0.4);
-        }
-
-        .last-update {
-            text-align: center;
-            color: #86868b;
-            margin-top: 20px;
-            font-size: 14px;
-        }
-
-        .loading {
-            text-align: center;
-            color: #86868b;
-            font-size: 17px;
-            padding: 50px;
-        }
-
-        .error {
-            background: #ff3b30;
+            border-radius: 28px;
+            background: var(--accent-color);
             color: white;
-            padding: 16px 20px;
-            border-radius: 12px;
-            margin: 20px 0;
-            font-size: 15px;
+            border: none;
+            box-shadow: 0 8px 24px rgba(0, 113, 227, 0.4);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 100;
         }
 
-        .user-table {
-            width: 100%;
-            border-collapse: collapse;
+        .refresh-fab:hover {
+            transform: scale(1.1) rotate(180deg);
+        }
+        
+        .refresh-fab:active {
+            transform: scale(0.95);
         }
 
-        .user-table th {
-            text-align: left;
-            padding: 12px 16px;
-            font-size: 13px;
-            font-weight: 500;
-            color: #6e6e73;
-            border-bottom: 1px solid #d2d2d7;
+        /* Loading & Error */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
         }
 
-        .user-table td {
-            padding: 16px;
-            font-size: 15px;
-            border-bottom: 1px solid #f5f5f7;
+        .loading-overlay.show {
+            opacity: 1;
+            pointer-events: all;
         }
 
-        .user-table tr:hover {
-            background: #fafafa;
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
         }
 
-        .badge {
-            display: inline-block;
-            padding: 4px 10px;
-            background: #f5f5f7;
-            border-radius: 12px;
-            font-size: 13px;
-            color: #6e6e73;
-            font-weight: 500;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
-        .badge.success {
-            background: #d1f4e0;
-            color: #00783e;
-        }
-
-        canvas {
-            max-height: 400px;
-        }
-
+        /* Mobile Responsive Improvements */
         @media (max-width: 768px) {
-            .header h1 {
-                font-size: 32px;
-            }
-
-            .time-filter {
-                flex-wrap: wrap;
-            }
-
-            .chart-header {
+            .header {
                 flex-direction: column;
-                gap: 16px;
                 align-items: flex-start;
+                gap: 16px;
             }
+
+            .header-controls {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .hero-section {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+
+            .current-temp-card {
+                padding: 24px;
+                text-align: center;
+            }
+
+            .temp-display {
+                font-size: 56px;
+            }
+
+            .trend-indicator {
+                margin-top: 8px;
+            }
+
+            .time-range-selector {
+                width: 100%;
+                overflow-x: auto;
+                justify-content: flex-start; /* changed from space-between for scroll */
+                padding: 8px;
+            }
+            
+            .range-btn {
+                flex: 0 0 auto; /* Prevent shrinking */
+                min-height: 44px; /* Touch target size */
+            }
+
+            .chart-card {
+                padding: 16px;
+            }
+
+            .trend-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            /* Enhanced Mobile Chart */
+            .chart-scroll-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                width: 100%;
+                padding-bottom: 8px; /* space for scrollbar */
+            }
+            
+            /* Force chart to be wider than screen on mobile */
+            .chart-scroll-wrapper canvas {
+                min-width: 600px; 
+                height: 300px !important;
+            }
+
+            /* Mobile Table Card Layout */
+            .table-container thead {
+                display: none;
+            }
+
+            .table-container tbody tr {
+                display: flex;
+                flex-direction: column;
+                background: var(--card-bg);
+                border-bottom: 1px solid var(--border-color);
+                padding: 16px;
+                gap: 8px;
+            }
+
+            .table-container td {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 4px 0;
+                border: none;
+                font-size: 14px;
+            }
+
+            .table-container td::before {
+                content: attr(data-label);
+                font-weight: 600;
+                color: var(--text-sub);
+                margin-right: 12px;
+            }
+            
+            /* Hide MAC Address label in card view as it is self explanatory or too long */
+             .table-container td:first-child::before {
+                display: none;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .temp-display {
+                font-size: 48px;
+            }
+            
+            .container {
+                padding: 12px;
+                padding-bottom: 80px;
+            }
+        }
+
+        /* Trend Analysis */
+        .trend-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .trend-item {
+            padding: 20px;
+            background: var(--bg-color);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .trend-label {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .trend-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .trend-sub {
+            font-size: 12px;
+            color: var(--text-sub);
+            margin-top: 4px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            width: fit-content;
+        }
+
+        .status-stable { background: rgba(52, 199, 89, 0.15); color: var(--success-color); }
+        .status-moderate { background: rgba(255, 149, 0, 0.15); color: #ff9f0a; }
+        .status-unstable { background: rgba(255, 59, 48, 0.15); color: #ff453a; }
+
+        @media (max-width: 600px) {
+            .trend-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Temperature Monitor</h1>
-            <p>Real-time environmental monitoring and analytics</p>
-        </div>
 
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('temperature')">Temperature</button>
-            <button class="tab" onclick="switchTab('users')">Connected Users</button>
-        </div>
-
-        <div id="loading" class="loading">Loading data...</div>
-        <div id="error" class="error" style="display: none;"></div>
-
-        <!-- Temperature Tab -->
-        <div id="temperature-tab" class="tab-content active" style="display: none;">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Current Temperature</div>
-                    <div class="stat-value" id="stat-current">--<span class="stat-unit">°C</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Average</div>
-                    <div class="stat-value" id="stat-avg">--<span class="stat-unit">°C</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Minimum</div>
-                    <div class="stat-value" id="stat-min">--<span class="stat-unit">°C</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Maximum</div>
-                    <div class="stat-value" id="stat-max">--<span class="stat-unit">°C</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Total Readings</div>
-                    <div class="stat-value" id="stat-total">--</div>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <div class="chart-header">
-                    <div class="chart-title">Temperature Trends</div>
-                    <div class="time-filter">
-                        <button class="time-btn" data-hours="1">1H</button>
-                        <button class="time-btn" data-hours="6">6H</button>
-                        <button class="time-btn active" data-hours="24">24H</button>
-                        <button class="time-btn" data-hours="72">3D</button>
-                        <button class="time-btn" data-hours="168">7D</button>
-                    </div>
-                </div>
-                <canvas id="tempChart"></canvas>
-            </div>
-
-            <div class="chart-container">
-                <div class="chart-header">
-                    <div class="chart-title">Distribution</div>
-                </div>
-                <canvas id="histogramChart"></canvas>
+<div class="container">
+    <header class="header">
+        <div class="station-info">
+            <h1>Weather Station Alpha</h1>
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                Online
             </div>
         </div>
-
-        <!-- Users Tab -->
-        <div id="users-tab" class="tab-content" style="display: none;">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Total Connections</div>
-                    <div class="stat-value" id="stat-users-total">--</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Unique Devices</div>
-                    <div class="stat-value" id="stat-users-unique">--</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">With Email</div>
-                    <div class="stat-value" id="stat-users-email">--</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">With Phone</div>
-                    <div class="stat-value" id="stat-users-phone">--</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Last 24 Hours</div>
-                    <div class="stat-value" id="stat-users-24h">--</div>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <div class="chart-header">
-                    <div class="chart-title">Recent Connections</div>
-                </div>
-                <table class="user-table" id="users-table">
-                    <thead>
-                        <tr>
-                            <th>Device</th>
-                            <th>Email</th>
-                            <th>Phone</th>
-                            <th>Duration</th>
-                            <th>Connected</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-tbody">
-                        <tr><td colspan="5" style="text-align: center; color: #86868b;">No data available</td></tr>
-                    </tbody>
-                </table>
-            </div>
+        <div class="header-controls">
+            <span class="last-update" id="lastUpdate">Updated: Just now</span>
         </div>
+    </header>
 
-        <div class="last-update" id="lastUpdate">Last updated: --</div>
-
-        <button class="refresh-btn" onclick="loadAllData()" title="Refresh">↻</button>
+    <div class="nav-tabs">
+        <button class="nav-tab active" onclick="switchTab('temperature')">Temperature</button>
+        <button class="nav-tab" onclick="switchTab('users')">Users</button>
     </div>
 
-    <script>
-        let tempChart = null;
-        let histogramChart = null;
-        let currentHours = 24;
-        let currentTab = 'temperature';
+    <!-- Temperature Tab -->
+    <main id="temperature-tab" class="tab-content active">
+        <section class="hero-section">
+            <div class="current-temp-card">
+                <div class="stat-label">Current Reading</div>
+                <div class="temp-display" id="hero-temp">--</div>
+                <div class="trend-indicator" id="hero-trend">
+                    <span>--</span>
+                </div>
+            </div>
+            
+            <div class="time-range-selector">
+                <button class="range-btn" onclick="setTimeRange(1, this)">1H</button>
+                <button class="range-btn" onclick="setTimeRange(6, this)">6H</button>
+                <button class="range-btn active" onclick="setTimeRange(24, this)">24H</button>
+                <button class="range-btn" onclick="setTimeRange(72, this)">3D</button>
+                <button class="range-btn" onclick="setTimeRange(720, this)">30D</button>
+            </div>
+        </section>
 
-        document.addEventListener('DOMContentLoaded', function() {
-            loadAllData();
-            setInterval(loadAllData, 5 * 60 * 1000); // Auto-refresh every 5 minutes
+        <section class="chart-card">
+            <div class="chart-header">
+                <h2 class="chart-title">Temperature Trend</h2>
+            </div>
+            <div class="chart-scroll-wrapper">
+                <canvas id="tempChart" height="100"></canvas>
+            </div>
+        </section>
 
-            document.querySelectorAll('.time-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active');
-                    currentHours = parseInt(this.dataset.hours);
-                    loadTemperatureData();
-                });
-            });
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Average</div>
+                <div class="stat-value" id="stat-avg">--<span class="stat-unit">°C</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Minimum</div>
+                <div class="stat-value" id="stat-min">--<span class="stat-unit">°C</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Maximum</div>
+                <div class="stat-value" id="stat-max">--<span class="stat-unit">°C</span></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Readings</div>
+                <div class="stat-value" id="stat-total">--</div>
+            </div>
+        </section>
+
+        <section class="chart-card">
+            <div class="chart-header">
+                <h2 class="chart-title">Trend Analysis</h2>
+            </div>
+            <div class="trend-grid">
+                <div class="trend-item">
+                    <div class="trend-label">Average Drift</div>
+                    <div class="trend-value" id="trend-drift">--</div>
+                    <div class="trend-sub">Last vs First Reading</div>
+                </div>
+                <div class="trend-item">
+                    <div class="trend-label">Volatility</div>
+                    <div class="trend-value" id="trend-volatility">--</div>
+                    <div class="trend-sub">Standard Deviation</div>
+                </div>
+                <div class="trend-item">
+                    <div class="trend-label">Peak Temperature</div>
+                    <div class="trend-value" id="trend-peak">--</div>
+                    <div class="trend-sub" id="trend-peak-time">at --</div>
+                </div>
+                <div class="trend-item">
+                    <div class="trend-label">Lowest Temperature</div>
+                    <div class="trend-value" id="trend-low">--</div>
+                    <div class="trend-sub" id="trend-low-time">at --</div>
+                </div>
+                <div class="trend-item" style="grid-column: span 2">
+                    <div class="trend-label">Stability Index</div>
+                    <div id="trend-stability">--</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Users Tab -->
+    <main id="users-tab" class="tab-content">
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Users</div>
+                <div class="stat-value" id="user-total">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Unique Devices</div>
+                <div class="stat-value" id="user-unique">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">With Email</div>
+                <div class="stat-value" id="user-email">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">With Phone</div>
+                <div class="stat-value" id="user-phone">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Connections (24h)</div>
+                <div class="stat-value" id="user-24h">--</div>
+            </div>
+        </section>
+
+        <section class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Device Info</th>
+                        <th>Contact</th>
+                        <th>Duration</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody id="users-table-body">
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<button class="refresh-fab" onclick="reloadData()" title="Refresh Data">↻</button>
+
+<div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+</div>
+
+<script>
+    // State
+    const state = {
+        hours: 24,
+        charts: {
+            temp: null
+        }
+    };
+
+    // Initialization
+    document.addEventListener('DOMContentLoaded', () => {
+        reloadData();
+        setInterval(reloadData, 300000); // 5 mins
+        
+        // Dark mode chart defaults
+        Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--text-sub').trim();
+        Chart.defaults.borderColor = getComputedStyle(document.body).getPropertyValue('--border-color').trim();
+        Chart.defaults.font.family = "'Inter', sans-serif";
+    });
+
+    // Theme changes listener for charts
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+        if (state.charts.temp) state.charts.temp.update();
+    });
+
+    // Navigation
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+        
+        document.getElementById(`${tabId}-tab`).classList.add('active');
+        event.target.classList.add('active');
+        
+        if (tabId === 'users') loadUserData();
+    }
+
+    function setTimeRange(hours, btn) {
+        state.hours = hours;
+        document.querySelectorAll('.range-btn').forEach(el => el.classList.remove('active'));
+        btn.classList.add('active');
+        loadTempData();
+    }
+
+    async function reloadData() {
+        showLoading(true);
+        await Promise.all([loadTempData(), loadUserData()]);
+        updateLastSeen();
+        showLoading(false);
+    }
+
+    // Data Fetching
+    async function loadTempData() {
+        try {
+            const res = await fetch(`api/getData.php?hours=${state.hours}`);
+            const json = await res.json();
+            
+            if (json.status === 'success') {
+                updateHero(json.stats);
+                updateTempStats(json.stats);
+                renderTempChart(json.data);
+                renderTrendAnalysis(json.data);
+            }
+        } catch (e) {
+            console.error('Temp fetch error:', e);
+        }
+    }
+
+    async function loadUserData() {
+        try {
+            const res = await fetch(`api/getUserData.php?hours=168`); // Keep 7 days for user list logic
+            const json = await res.json();
+            
+            if (json.status === 'success') {
+                updateUserStats(json.stats);
+                renderUserTable(json.data);
+            }
+        } catch (e) {
+            console.error('User fetch error:', e);
+        }
+    }
+
+    // UI Updates
+    function updateHero(stats) {
+        const el = document.getElementById('hero-temp');
+        el.innerHTML = `${stats.current.toFixed(1)}<span class="temp-unit">°C</span>`;
+        
+        const trendEl = document.getElementById('hero-trend');
+        const diff = stats.current - stats.avg;
+        const icon = diff >= 0 ? '↑' : '↓';
+        const className = diff >= 0 ? 'trend-up' : 'trend-down';
+        
+        trendEl.innerHTML = `${icon} ${Math.abs(diff).toFixed(1)}° vs Avg`;
+        trendEl.className = `trend-indicator ${className}`;
+    }
+
+    function updateTempStats(stats) {
+        document.getElementById('stat-avg').innerHTML = `${stats.avg.toFixed(1)}<span class="stat-unit">°C</span>`;
+        document.getElementById('stat-min').innerHTML = `${stats.min.toFixed(1)}<span class="stat-unit">°C</span>`;
+        document.getElementById('stat-max').innerHTML = `${stats.max.toFixed(1)}<span class="stat-unit">°C</span>`;
+        document.getElementById('stat-total').textContent = stats.total_readings.toLocaleString();
+    }
+
+    function updateUserStats(stats) {
+        document.getElementById('user-total').textContent = stats.total_users;
+        document.getElementById('user-unique').textContent = stats.unique_devices;
+        document.getElementById('user-email').textContent = stats.users_with_email;
+        document.getElementById('user-phone').textContent = stats.users_with_phone;
+        document.getElementById('user-24h').textContent = stats.connections_24h;
+    }
+
+    function renderUserTable(data) {
+        const tbody = document.getElementById('users-table-body');
+        tbody.innerHTML = data.map(user => {
+            // Fallback Iogic: if no email/phone, prioritize displaying specific identifiers
+            const contactDisplay = [];
+            if (user.email) contactDisplay.push(`<div class="user-badge has-data">📧 ${user.email}</div>`);
+            if (user.phone) contactDisplay.push(`<div class="user-badge has-data">📱 ${user.phone}</div>`);
+            
+            // If neither exists, show fallback info if available
+            if (contactDisplay.length === 0) {
+                 // Determine what's available
+                 const fallback = user.ip ? `IP: ${user.ip}` : 'No contact info';
+                 contactDisplay.push(`<div class="user-badge">${fallback}</div>`);
+            }
+
+            return `
+                <tr>
+                    <td data-label="Device">
+                        <div style="font-weight:600">${user.mac_address || 'Unknown MAC'}</div>
+                    </td>
+                    <td data-label="Contact">
+                        <div style="display:flex; flex-direction:column; gap:4px; align-items: flex-end;">
+                            ${contactDisplay.join('')}
+                        </div>
+                    </td>
+                    <td data-label="Duration">${formatDuration(user.duration)}</td>
+                    <td data-label="Last Seen">${timeAgo(user.received_at)}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // Charts
+    function renderTempChart(data) {
+        const ctx = document.getElementById('tempChart').getContext('2d');
+        const timestamps = data.map(d => new Date(d.timestamp * 1000).toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        }));
+        const temps = data.map(d => d.temperature);
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, 'rgba(0, 113, 227, 0.4)');
+        gradient.addColorStop(1, 'rgba(0, 113, 227, 0.0)');
+
+        if (state.charts.temp) state.charts.temp.destroy();
+
+        state.charts.temp = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: 'Temperature',
+                    data: temps,
+                    borderColor: '#0071e3',
+                    backgroundColor: gradient,
+                    borderWidth: 3,
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: '#0071e3',
+                    pointBorderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false, /* Critical for mobile height control */
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(29, 29, 31, 0.9)',
+                        padding: 12,
+                        cornerRadius: 12,
+                        callbacks: {
+                            label: (ctx) => `${ctx.parsed.y.toFixed(2)} °C`
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+                    y: { border: { display: false }, grid: { color: 'rgba(0,0,0,0.05)' } }
+                }
+            }
+        });
+    }
+
+    function renderTrendAnalysis(data) {
+        if (!data || data.length < 2) return;
+
+        // 1. Average Drift
+        const first = data[0].temperature;
+        const last = data[data.length - 1].temperature;
+        const drift = last - first;
+        const driftSign = drift > 0 ? '+' : '';
+        document.getElementById('trend-drift').innerHTML = 
+            `${driftSign}${drift.toFixed(1)}<span class="stat-unit">°C</span>`;
+
+        // 2 & 3. Peak & Lowest
+        let max = -Infinity, min = Infinity;
+        let maxTime = null, minTime = null;
+
+        data.forEach(d => {
+            if (d.temperature > max) { max = d.temperature; maxTime = d.timestamp; }
+            if (d.temperature < min) { min = d.temperature; minTime = d.timestamp; }
         });
 
-        function switchTab(tab) {
-            currentTab = tab;
-            
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-            
-            event.target.classList.add('active');
-            document.getElementById(tab + '-tab').style.display = 'block';
-            
-            if (tab === 'users') {
-                loadUserData();
-            }
+        const timeFmt = (ts) => new Date(ts * 1000).toLocaleString(undefined, {
+            hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric'
+        });
+
+        document.getElementById('trend-peak').innerHTML = `${max.toFixed(1)}<span class="stat-unit">°C</span>`;
+        document.getElementById('trend-peak-time').textContent = `at ${timeFmt(maxTime)}`;
+
+        document.getElementById('trend-low').innerHTML = `${min.toFixed(1)}<span class="stat-unit">°C</span>`;
+        document.getElementById('trend-low-time').textContent = `at ${timeFmt(minTime)}`;
+
+        // 4. Stability & Volatility
+        const sum = data.reduce((a, b) => a + b.temperature, 0);
+        const mean = sum / data.length;
+        const variance = data.reduce((a, b) => a + Math.pow(b.temperature - mean, 2), 0) / data.length;
+        const stdDev = Math.sqrt(variance);
+
+        document.getElementById('trend-volatility').innerHTML = 
+            `±${stdDev.toFixed(1)}<span class="stat-unit">°C</span>`;
+
+        let status, statusClass;
+        if (stdDev < 0.5) {
+            status = 'Stable';
+            statusClass = 'status-stable';
+        } else if (stdDev < 1.5) {
+            status = 'Moderate';
+            statusClass = 'status-moderate';
+        } else {
+            status = 'High Fluctuation';
+            statusClass = 'status-unstable';
         }
 
-        async function loadAllData() {
-            await loadTemperatureData();
-            if (currentTab === 'users') {
-                await loadUserData();
-            }
-        }
+        document.getElementById('trend-stability').innerHTML = 
+            `<span class="status-pill ${statusClass}">${status}</span>`;
+    }
 
-        async function loadTemperatureData() {
-            try {
-                const response = await fetch(`api/getData.php?hours=${currentHours}`);
-                const result = await response.json();
+    // Utilities
+    function showLoading(show) {
+        const el = document.getElementById('loading');
+        if (show) el.classList.add('show');
+        else el.classList.remove('show');
+    }
 
-                if (result.status === 'error') {
-                    showError(result.message);
-                    return;
-                }
+    function updateLastSeen() {
+        const el = document.getElementById('lastUpdate');
+        el.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+    }
 
-                hideError();
-                updateTempStats(result.stats);
-                updateCharts(result.data);
-                updateLastUpdate();
+    function timeAgo(timestamp) {
+        const seconds = Math.floor((new Date() - new Date(timestamp * 1000)) / 1000);
+        let interval = seconds / 31536000;
+        if (interval > 1) return Math.floor(interval) + " years ago";
+        interval = seconds / 2592000;
+        if (interval > 1) return Math.floor(interval) + " months ago";
+        interval = seconds / 86400;
+        if (interval > 1) return Math.floor(interval) + " days ago";
+        interval = seconds / 3600;
+        if (interval > 1) return Math.floor(interval) + " hours ago";
+        interval = seconds / 60;
+        if (interval > 1) return Math.floor(interval) + " minutes ago";
+        return Math.floor(seconds) + " seconds ago";
+    }
 
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('temperature-tab').style.display = 'block';
-
-            } catch (error) {
-                showError('Failed to load temperature data');
-            }
-        }
-
-        async function loadUserData() {
-            try {
-                const response = await fetch('api/getUserData.php?hours=168'); // Last 7 days
-                const result = await response.json();
-
-                if (result.status === 'error') {
-                    console.log('User data error:', result.message);
-                    return;
-                }
-
-                updateUserStats(result.stats);
-                updateUserTable(result.data);
-
-            } catch (error) {
-                console.log('Failed to load user data:', error);
-            }
-        }
-
-        function updateTempStats(stats) {
-            document.getElementById('stat-current').innerHTML = 
-                `${stats.current.toFixed(1)}<span class="stat-unit">°C</span>`;
-            document.getElementById('stat-avg').innerHTML = 
-                `${stats.avg.toFixed(1)}<span class="stat-unit">°C</span>`;
-            document.getElementById('stat-min').innerHTML = 
-                `${stats.min.toFixed(1)}<span class="stat-unit">°C</span>`;
-            document.getElementById('stat-max').innerHTML = 
-                `${stats.max.toFixed(1)}<span class="stat-unit">°C</span>`;
-            document.getElementById('stat-total').textContent = stats.total_readings;
-        }
-
-        function updateUserStats(stats) {
-            document.getElementById('stat-users-total').textContent = stats.total_users;
-            document.getElementById('stat-users-unique').textContent = stats.unique_devices;
-            document.getElementById('stat-users-email').textContent = stats.users_with_email;
-            document.getElementById('stat-users-phone').textContent = stats.users_with_phone;
-            document.getElementById('stat-users-24h').textContent = stats.connections_24h;
-        }
-
-        function updateUserTable(users) {
-            const tbody = document.getElementById('users-tbody');
-            
-            if (users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #86868b;">No connections yet</td></tr>';
-                return;
-            }
-
-            tbody.innerHTML = users.map(user => `
-                <tr>
-                    <td>${user.mac_address || 'Unknown'}</td>
-                    <td>${user.email ? `<span class="badge success">${user.email}</span>` : '--'}</td>
-                    <td>${user.phone ? `<span class="badge success">${user.phone}</span>` : '--'}</td>
-                    <td>${formatDuration(user.duration)}</td>
-                    <td>${formatDate(user.received_at)}</td>
-                </tr>
-            `).join('');
-        }
-
-        function formatDuration(seconds) {
-            if (!seconds || seconds < 60) return `${seconds}s`;
-            const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m`;
-            const hours = Math.floor(minutes / 60);
-            return `${hours}h ${minutes % 60}m`;
-        }
-
-        function formatDate(timestamp) {
-            const date = new Date(timestamp * 1000);
-            const now = new Date();
-            const diff = Math.floor((now - date) / 1000);
-            
-            if (diff < 60) return 'Just now';
-            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-            
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        }
-
-        function updateCharts(data) {
-            const labels = data.map(d => {
-                const date = new Date(d.timestamp * 1000);
-                return date.toLocaleString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric', 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                });
-            });
-            const temperatures = data.map(d => d.temperature);
-
-            if (tempChart) tempChart.destroy();
-
-            const ctx = document.getElementById('tempChart').getContext('2d');
-            tempChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Temperature',
-                        data: temperatures,
-                        borderColor: '#0071e3',
-                        backgroundColor: 'rgba(0, 113, 227, 0.05)',
-                        borderWidth: 2,
-                        tension: 0.4,
-                        fill: true,
-                        pointRadius: 2,
-                        pointHoverRadius: 6,
-                        pointBackgroundColor: '#0071e3',
-                        pointBorderColor: 'white',
-                        pointBorderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(29, 29, 31, 0.95)',
-                            padding: 12,
-                            cornerRadius: 8,
-                            titleFont: { size: 13, weight: '500' },
-                            bodyFont: { size: 15, weight: '600' },
-                            callbacks: {
-                                label: function(context) {
-                                    return context.parsed.y.toFixed(2) + '°C';
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: false,
-                            grid: { color: '#f5f5f7' },
-                            ticks: {
-                                font: { size: 13 },
-                                color: '#86868b',
-                                callback: function(value) {
-                                    return value + '°C';
-                                }
-                            }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: {
-                                font: { size: 13 },
-                                color: '#86868b',
-                                maxRotation: 45,
-                                minRotation: 45
-                            }
-                        }
-                    }
-                }
-            });
-
-            updateHistogram(temperatures);
-        }
-
-        function updateHistogram(temperatures) {
-            const min = Math.floor(Math.min(...temperatures));
-            const max = Math.ceil(Math.max(...temperatures));
-            const bins = 10;
-            const binSize = (max - min) / bins;
-
-            const histogram = new Array(bins).fill(0);
-            const binLabels = [];
-
-            for (let i = 0; i < bins; i++) {
-                const binStart = min + (i * binSize);
-                const binEnd = binStart + binSize;
-                binLabels.push(`${binStart.toFixed(1)}-${binEnd.toFixed(1)}°C`);
-            }
-
-            temperatures.forEach(temp => {
-                const binIndex = Math.min(Math.floor((temp - min) / binSize), bins - 1);
-                histogram[binIndex]++;
-            });
-
-            if (histogramChart) histogramChart.destroy();
-
-            const ctx = document.getElementById('histogramChart').getContext('2d');
-            histogramChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: binLabels,
-                    datasets: [{
-                        label: 'Frequency',
-                        data: histogram,
-                        backgroundColor: 'rgba(0, 113, 227, 0.8)',
-                        borderRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(29, 29, 31, 0.95)',
-                            padding: 12,
-                            cornerRadius: 8
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: '#f5f5f7' },
-                            ticks: {
-                                stepSize: 1,
-                                font: { size: 13 },
-                                color: '#86868b'
-                            }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: {
-                                font: { size: 13 },
-                                color: '#86868b'
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function updateLastUpdate() {
-            const now = new Date();
-            document.getElementById('lastUpdate').textContent = 
-                `Last updated: ${now.toLocaleString()}`;
-        }
-
-        function showError(message) {
-            document.getElementById('error').textContent = message;
-            document.getElementById('error').style.display = 'block';
-            document.getElementById('loading').style.display = 'none';
-        }
-
-        function hideError() {
-            document.getElementById('error').style.display = 'none';
-        }
-    </script>
+    function formatDuration(seconds) {
+        if (!seconds) return '--';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return `${h > 0 ? h + 'h ' : ''}${m > 0 ? m + 'm ' : ''}${s}s`;
+    }
+</script>
 </body>
 </html>
