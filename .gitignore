@@ -1,0 +1,65 @@
+# Database files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.backup
+*.old
+backups/
+*.bak
+
+# Data directory
+data/temperature_data.json
+data/*.json
+
+# Configuration files with sensitive data
+config.php
+settings.php
+credentials.php
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+error.log
+access.log
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# PHP
+vendor/
+composer.lock
+
+# Node modules (if using npm for frontend)
+node_modules/
+package-lock.json
+
+# Build files
+build/
+dist/
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Upload directory (may contain sensitive user data)
+uploads/
