@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            background: #f5f5f7;
+            min-height: 100vh;
+            padding: 20px;
+            color: #1d1d1f;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 19px;
+            color: #6e6e73;
+            font-weight: 400;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #d2d2d7;
+            padding-bottom: 0;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            font-size: 17px;
+            font-weight: 500;
+            color: #6e6e73;
+            cursor: pointer;
+            position: relative;
+            transition: color 0.2s;
+        }
+
+        .tab:hover {
+            color: #1d1d1f;
+        }
+
+        .tab.active {
+            color: #0071e3;
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #0071e3;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #d2d2d7;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: #6e6e73;
+            margin-bottom: 8px;
+            font-weight: 500;
+            letter-spacing: -0.08px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #1d1d1f;
+            letter-spacing: -0.5px;
+        }
+
+        .stat-unit {
+            font-size: 17px;
+            color: #86868b;
+            margin-left: 4px;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            border: 1px solid #d2d2d7;
+            margin-bottom: 30px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .chart-title {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+
+        .time-filter {
+            display: flex;
+            gap: 8px;
+            background: #f5f5f7;
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .time-btn {
+            padding: 6px 14px;
+            border: none;
+            background: transparent;
+            color: #1d1d1f;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .time-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .time-btn.active {
+            background: white;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #0071e3;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 16px rgba(0, 113, 227, 0.4);
+        }
+
+        .last-update {
+            text-align: center;
+            color: #86868b;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #86868b;
+            font-size: 17px;
+            padding: 50px;
+        }
+
+        .error {
+            background: #ff3b30;
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            font-size: 15px;
+        }
+
+        .user-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .user-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #6e6e73;
+            border-bottom: 1px solid #d2d2d7;
+        }
+
+        .user-table td {
+            padding: 16px;
+            font-size: 15px;
+            border-bottom: 1px solid #f5f5f7;
+        }
+
+        .user-table tr:hover {
+            background: #fafafa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #f5f5f7;
+            border-radius: 12px;
+            font-size: 13px;
+            color: #6e6e73;
+            font-weight: 500;
+        }
+
+        .badge.success {
+            background: #d1f4e0;
+            color: #00783e;
+        }
+
+        canvas {
+            max-height: 400px;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 32px;
+            }
+
+            .time-filter {
+                flex-wrap: wrap;
+            }
+
+            .chart-header {
+                flex-direction: column;
+                gap: 16px;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Temperature Monitor</h1>
+            <p>Real-time environmental monitoring and analytics</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('temperature')">Temperature</button>
+            <button class="tab" onclick="switchTab('users')">Connected Users</button>
+        </div>
+
+        <div id="loading" class="loading">Loading data...</div>
+        <div id="error" class="error" style="display: none;"></div>
+
+        <!-- Temperature Tab -->
+        <div id="temperature-tab" class="tab-content active" style="display: none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Current Temperature</div>
+                    <div class="stat-value" id="stat-current">--<span class="stat-unit">°C</span></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Average</div>
+                    <div class="stat-value" id="stat-avg">--<span class="stat-unit">°C</span></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Minimum</div>
+                    <div class="stat-value" id="stat-min">--<span class="stat-unit">°C</span></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Maximum</div>
+                    <div class="stat-value" id="stat-max">--<span class="stat-unit">°C</span></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Readings</div>
+                    <div class="stat-value" id="stat-total">--</div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-header">
+                    <div class="chart-title">Temperature Trends</div>
+                    <div class="time-filter">
+                        <button class="time-btn" data-hours="1">1H</button>
+                        <button class="time-btn" data-hours="6">6H</button>
+                        <button class="time-btn active" data-hours="24">24H</button>
+                        <button class="time-btn" data-hours="72">3D</button>
+                        <button class="time-btn" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <canvas id="tempChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-header">
+                    <div class="chart-title">Distribution</div>
+                </div>
+                <canvas id="histogramChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Users Tab -->
+        <div id="users-tab" class="tab-content" style="display: none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Connections</div>
+                    <div class="stat-value" id="stat-users-total">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Unique Devices</div>
+                    <div class="stat-value" id="stat-users-unique">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">With Email</div>
+                    <div class="stat-value" id="stat-users-email">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">With Phone</div>
+                    <div class="stat-value" id="stat-users-phone">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Last 24 Hours</div>
+                    <div class="stat-value" id="stat-users-24h">--</div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <div class="chart-header">
+                    <div class="chart-title">Recent Connections</div>
+                </div>
+                <table class="user-table" id="users-table">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Duration</th>
+                            <th>Connected</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                        <tr><td colspan="5" style="text-align: center; color: #86868b;">No data available</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="last-update" id="lastUpdate">Last updated: --</div>
+
+        <button class="refresh-btn" onclick="loadAllData()" title="Refresh">↻</button>
+    </div>
+
+    <script>
+        let tempChart = null;
+        let histogramChart = null;
+        let currentHours = 24;
+        let currentTab = 'temperature';
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAllData();
+            setInterval(loadAllData, 5 * 60 * 1000); // Auto-refresh every 5 minutes
+
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    currentHours = parseInt(this.dataset.hours);
+                    loadTemperatureData();
+                });
+            });
+        });
+
+        function switchTab(tab) {
+            currentTab = tab;
+            
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            
+            event.target.classList.add('active');
+            document.getElementById(tab + '-tab').style.display = 'block';
+            
+            if (tab === 'users') {
+                loadUserData();
+            }
+        }
+
+        async function loadAllData() {
+            await loadTemperatureData();
+            if (currentTab === 'users') {
+                await loadUserData();
+            }
+        }
+
+        async function loadTemperatureData() {
+            try {
+                const response = await fetch(`api/getData.php?hours=${currentHours}`);
+                const result = await response.json();
+
+                if (result.status === 'error') {
+                    showError(result.message);
+                    return;
+                }
+
+                hideError();
+                updateTempStats(result.stats);
+                updateCharts(result.data);
+                updateLastUpdate();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('temperature-tab').style.display = 'block';
+
+            } catch (error) {
+                showError('Failed to load temperature data');
+            }
+        }
+
+        async function loadUserData() {
+            try {
+                const response = await fetch('api/getUserData.php?hours=168'); // Last 7 days
+                const result = await response.json();
+
+                if (result.status === 'error') {
+                    console.log('User data error:', result.message);
+                    return;
+                }
+
+                updateUserStats(result.stats);
+                updateUserTable(result.data);
+
+            } catch (error) {
+                console.log('Failed to load user data:', error);
+            }
+        }
+
+        function updateTempStats(stats) {
+            document.getElementById('stat-current').innerHTML = 
+                `${stats.current.toFixed(1)}<span class="stat-unit">°C</span>`;
+            document.getElementById('stat-avg').innerHTML = 
+                `${stats.avg.toFixed(1)}<span class="stat-unit">°C</span>`;
+            document.getElementById('stat-min').innerHTML = 
+                `${stats.min.toFixed(1)}<span class="stat-unit">°C</span>`;
+            document.getElementById('stat-max').innerHTML = 
+                `${stats.max.toFixed(1)}<span class="stat-unit">°C</span>`;
+            document.getElementById('stat-total').textContent = stats.total_readings;
+        }
+
+        function updateUserStats(stats) {
+            document.getElementById('stat-users-total').textContent = stats.total_users;
+            document.getElementById('stat-users-unique').textContent = stats.unique_devices;
+            document.getElementById('stat-users-email').textContent = stats.users_with_email;
+            document.getElementById('stat-users-phone').textContent = stats.users_with_phone;
+            document.getElementById('stat-users-24h').textContent = stats.connections_24h;
+        }
+
+        function updateUserTable(users) {
+            const tbody = document.getElementById('users-tbody');
+            
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #86868b;">No connections yet</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>${user.mac_address || 'Unknown'}</td>
+                    <td>${user.email ? `<span class="badge success">${user.email}</span>` : '--'}</td>
+                    <td>${user.phone ? `<span class="badge success">${user.phone}</span>` : '--'}</td>
+                    <td>${formatDuration(user.duration)}</td>
+                    <td>${formatDate(user.received_at)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds < 60) return `${seconds}s`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m`;
+        }
+
+        function formatDate(timestamp) {
+            const date = new Date(timestamp * 1000);
+            const now = new Date();
+            const diff = Math.floor((now - date) / 1000);
+            
+            if (diff < 60) return 'Just now';
+            if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+            
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function updateCharts(data) {
+            const labels = data.map(d => {
+                const date = new Date(d.timestamp * 1000);
+                return date.toLocaleString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+            });
+            const temperatures = data.map(d => d.temperature);
+
+            if (tempChart) tempChart.destroy();
+
+            const ctx = document.getElementById('tempChart').getContext('2d');
+            tempChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Temperature',
+                        data: temperatures,
+                        borderColor: '#0071e3',
+                        backgroundColor: 'rgba(0, 113, 227, 0.05)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 2,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#0071e3',
+                        pointBorderColor: 'white',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(29, 29, 31, 0.95)',
+                            padding: 12,
+                            cornerRadius: 8,
+                            titleFont: { size: 13, weight: '500' },
+                            bodyFont: { size: 15, weight: '600' },
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(2) + '°C';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            grid: { color: '#f5f5f7' },
+                            ticks: {
+                                font: { size: 13 },
+                                color: '#86868b',
+                                callback: function(value) {
+                                    return value + '°C';
+                                }
+                            }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { size: 13 },
+                                color: '#86868b',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+
+            updateHistogram(temperatures);
+        }
+
+        function updateHistogram(temperatures) {
+            const min = Math.floor(Math.min(...temperatures));
+            const max = Math.ceil(Math.max(...temperatures));
+            const bins = 10;
+            const binSize = (max - min) / bins;
+
+            const histogram = new Array(bins).fill(0);
+            const binLabels = [];
+
+            for (let i = 0; i < bins; i++) {
+                const binStart = min + (i * binSize);
+                const binEnd = binStart + binSize;
+                binLabels.push(`${binStart.toFixed(1)}-${binEnd.toFixed(1)}°C`);
+            }
+
+            temperatures.forEach(temp => {
+                const binIndex = Math.min(Math.floor((temp - min) / binSize), bins - 1);
+                histogram[binIndex]++;
+            });
+
+            if (histogramChart) histogramChart.destroy();
+
+            const ctx = document.getElementById('histogramChart').getContext('2d');
+            histogramChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: binLabels,
+                    datasets: [{
+                        label: 'Frequency',
+                        data: histogram,
+                        backgroundColor: 'rgba(0, 113, 227, 0.8)',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(29, 29, 31, 0.95)',
+                            padding: 12,
+                            cornerRadius: 8
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f5f5f7' },
+                            ticks: {
+                                stepSize: 1,
+                                font: { size: 13 },
+                                color: '#86868b'
+                            }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { size: 13 },
+                                color: '#86868b'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateLastUpdate() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = 
+                `Last updated: ${now.toLocaleString()}`;
+        }
+
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

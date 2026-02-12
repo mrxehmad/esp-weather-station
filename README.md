@@ -372,12 +372,6 @@ For production deployment:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -389,43 +383,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Chart.js for beautiful graphs
 - SQLite for reliable database engine
 
-## Changelog
-
-### v4.0 (Latest)
-- Added captive portal functionality
-- User tracking and analytics
-- Migrated to SQLite database
-- Professional iOS-styled dashboard
-- OTA update support
-
-### v3.0
-- Added OLED display support
-- Improved error handling
-- Better WiFi management
-
-### v2.0
-- Fixed offset calculation
-- HTTP retry logic
-- NTP time synchronization
-
-### v1.0
-- Initial release
-- Basic temperature monitoring
-- JSON file storage
-
 ## Support
 
-For issues and questions:
-- Open an issue on GitHub
-- Check existing issues for solutions
-- Review troubleshooting section
-
-## Roadmap
-
-- [ ] Mobile app (iOS/Android)
-- [ ] Email/SMS alerts
-- [ ] Multi-sensor support
-- [ ] Historical data export (CSV)
-- [ ] Grafana integration
-- [ ] MQTT support
-- [ ] Temperature predictions using ML
+For issues and questions Open an issue on GitHub.
