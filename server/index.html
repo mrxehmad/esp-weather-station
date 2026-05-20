@@ -6,7 +6,7 @@
     <title>Weather Station · Temperature Monitor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://file.ehmi.se/Guest/cdn/chart.js"></script>
+    <script src="chart.js"></script>
     <style>
         /* ── CSS Variables ─────────────────────────────────────────────── */
         :root {
@@ -483,57 +483,79 @@
         .s-moderate { background: rgba(245,158,11,0.15); color: var(--warning); }
         .s-unstable { background: rgba(239,68,68,0.15);  color: var(--danger);  }
 
-        /* ── Users Tab ────────────────────────────────────────────────── */
-        .user-stats-row {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 14px;
-            margin-bottom: 20px;
-        }
 
-        .table-card {
-            background: var(--surface);
-            border-radius: var(--radius);
+
+        /* ── Update Mode Toggle ────────────────────────────────────────── */
+        .update-mode-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--surface2);
             border: 1px solid var(--border);
-            overflow: hidden;
-            box-shadow: var(--shadow-sm);
+            border-radius: 20px;
+            padding: 7px 14px;
+            user-select: none;
         }
 
-        table { width: 100%; border-collapse: collapse; }
-
-        th {
-            text-align: left;
-            padding: 14px 20px;
+        .update-mode-label {
             font-size: 12px;
             font-weight: 700;
+            letter-spacing: 0.5px;
             text-transform: uppercase;
-            letter-spacing: 0.8px;
             color: var(--text-sub);
-            background: var(--surface2);
-            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
         }
 
-        td {
-            padding: 14px 20px;
-            font-size: 14px;
-            color: var(--text);
-            border-bottom: 1px solid var(--border);
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
         }
 
-        tbody tr:last-child td { border-bottom: none; }
-        tbody tr:hover { background: var(--surface2); }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
 
-        .user-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 10px;
-            border-radius: 6px;
-            background: var(--surface2);
+        .toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--text-muted);
+            border-radius: 22px;
+            cursor: pointer;
+            transition: background 0.25s;
+        }
+
+        .toggle-thumb {
+            position: absolute;
+            top: 3px; left: 3px;
+            width: 16px; height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.25s;
+            pointer-events: none;
+        }
+
+        .toggle-switch input:checked ~ .toggle-track {
+            background: var(--success);
+            box-shadow: 0 0 10px rgba(34,197,94,0.4);
+        }
+
+        .toggle-switch input:checked ~ .toggle-track .toggle-thumb {
+            transform: translateX(18px);
+        }
+
+        .mode-text {
             font-size: 12px;
-            color: var(--text-sub);
+            font-weight: 700;
+            min-width: 44px;
+            transition: color 0.25s;
         }
 
-        .user-badge.has-data { background: rgba(59,130,246,0.1); color: var(--accent2); }
+        .mode-text.on  { color: var(--success); }
+        .mode-text.off { color: var(--text-muted); }
 
         /* ── FAB ──────────────────────────────────────────────────────── */
         .fab {
@@ -584,7 +606,6 @@
         @media (max-width: 900px) {
             .hero { grid-template-columns: 1fr; }
             .stats-row { grid-template-columns: repeat(2, 1fr); }
-            .user-stats-row { grid-template-columns: repeat(2, 1fr); }
             .analysis-grid { grid-template-columns: 1fr 1fr; }
         }
 
@@ -595,15 +616,9 @@
             .big-temp { font-size: 68px; }
             .hero-main { padding: 26px 28px; }
             .stats-row { grid-template-columns: 1fr 1fr; }
-            .user-stats-row { grid-template-columns: 1fr 1fr; }
             .analysis-grid { grid-template-columns: 1fr; }
             .range-selector { overflow-x: auto; }
             .chart-wrap { height: 260px; }
-            /* Mobile table */
-            .table-card thead { display: none; }
-            .table-card tbody tr { display: flex; flex-direction: column; padding: 14px; border-bottom: 1px solid var(--border); gap: 6px; }
-            .table-card td { display: flex; justify-content: space-between; padding: 0; border: none; }
-            .table-card td::before { content: attr(data-label); font-weight: 600; color: var(--text-sub); }
         }
 
         @media (max-width: 420px) {
@@ -626,16 +641,23 @@
             </div>
         </div>
         <div class="header-right">
+            <!-- Update Mode Toggle -->
+            <div class="update-mode-wrap" title="OTA Update Mode: ON = ESP stays awake, OFF = ESP deep sleeps every 10 min">
+                <span class="update-mode-label">🔧 OTA</span>
+                <label class="toggle-switch" id="updateModeToggleLabel">
+                    <input type="checkbox" id="updateModeToggle" onchange="setUpdateMode(this.checked)">
+                    <div class="toggle-track">
+                        <div class="toggle-thumb"></div>
+                    </div>
+                </label>
+                <span class="mode-text off" id="updateModeText">OFF</span>
+            </div>
             <div class="status-badge"><span class="status-dot"></span> Online</div>
             <span class="last-update" id="lastUpdate">—</span>
         </div>
     </header>
 
-    <!-- ── Nav ────────────────────────────────────────────────────────── -->
-    <div class="nav-tabs">
-        <button class="nav-tab active" onclick="switchTab('temperature', this)">Temperature</button>
-        <button class="nav-tab"        onclick="switchTab('users', this)">Users</button>
-    </div>
+
 
     <!-- ══ Temperature Tab ════════════════════════════════════════════════ -->
     <main id="temperature-tab" class="tab-content active">
@@ -805,46 +827,7 @@
 
     </main>
 
-    <!-- ══ Users Tab ══════════════════════════════════════════════════════ -->
-    <main id="users-tab" class="tab-content">
-        <div class="user-stats-row">
-            <div class="stat-card">
-                <div class="stat-label">Total Users</div>
-                <div class="stat-value" id="uTotal">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Unique Devices</div>
-                <div class="stat-value" id="uUniq">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">With Email</div>
-                <div class="stat-value" id="uEmail">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">With Phone</div>
-                <div class="stat-value" id="uPhone">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Active (24h)</div>
-                <div class="stat-value" id="u24h">--</div>
-            </div>
-        </div>
 
-        <div class="table-card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Device</th>
-                        <th>Contact</th>
-                        <th>Duration</th>
-                        <th>Last Seen</th>
-                    </tr>
-                </thead>
-                <tbody id="uTableBody">
-                </tbody>
-            </table>
-        </div>
-    </main>
 
 </div>
 
@@ -860,18 +843,53 @@ const S = { hours: 24, chart: null };
 document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.font.family = "'Inter', sans-serif";
     reloadAll();
+    loadUpdateMode();
     setInterval(reloadAll, 5 * 60 * 1000);
 });
 
-/* ── Nav ──────────────────────────────────────────────────────────────── */
-function switchTab(id, btn) {
-    document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
-    document.querySelectorAll('.nav-tab').forEach(e => e.classList.remove('active'));
-    document.getElementById(id + '-tab').classList.add('active');
-    btn.classList.add('active');
-    if (id === 'users') loadUsers();
+/* ── Update Mode ──────────────────────────────────────────────────────── */
+async function loadUpdateMode() {
+    try {
+        const r = await fetch('api/setUpdateMode.php');
+        const j = await r.json();
+        if (j.status === 'success') applyUpdateModeUI(j.update_mode);
+    } catch(e) { console.warn('Could not load update mode', e); }
 }
 
+async function setUpdateMode(enabled) {
+    const lbl = document.getElementById('updateModeToggleLabel');
+    lbl.style.opacity = '0.5';
+    lbl.style.pointerEvents = 'none';
+    try {
+        const r = await fetch('api/setUpdateMode.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ update_mode: enabled })
+        });
+        const j = await r.json();
+        if (j.status === 'success') {
+            applyUpdateModeUI(j.update_mode);
+        } else {
+            // revert on error
+            document.getElementById('updateModeToggle').checked = !enabled;
+        }
+    } catch(e) {
+        console.error('setUpdateMode failed', e);
+        document.getElementById('updateModeToggle').checked = !enabled;
+    } finally {
+        lbl.style.opacity = '';
+        lbl.style.pointerEvents = '';
+    }
+}
+
+function applyUpdateModeUI(isOn) {
+    document.getElementById('updateModeToggle').checked = isOn;
+    const txt = document.getElementById('updateModeText');
+    txt.textContent = isOn ? 'ON' : 'OFF';
+    txt.className   = 'mode-text ' + (isOn ? 'on' : 'off');
+}
+
+/* ── Nav ──────────────────────────────────────────────────────────────── */
 function setRange(hours, btn) {
     S.hours = hours;
     document.querySelectorAll('.range-btn').forEach(e => e.classList.remove('active'));
@@ -882,7 +900,7 @@ function setRange(hours, btn) {
 /* ── Data Load ────────────────────────────────────────────────────────── */
 async function reloadAll() {
     showLoader(true);
-    await Promise.all([loadTemp(), loadUsers()]);
+    await loadTemp();
     document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
     showLoader(false);
 }
@@ -897,17 +915,6 @@ async function loadTemp() {
             drawChart(j.data);
             fillAnalysis(j.data);
             fillDbMeta(j.database_info);
-        }
-    } catch(e) { console.error(e); }
-}
-
-async function loadUsers() {
-    try {
-        const r = await fetch('api/getUserData.php?hours=168');
-        const j = await r.json();
-        if (j.status === 'success') {
-            fillUserStats(j.stats);
-            fillUserTable(j.data);
         }
     } catch(e) { console.error(e); }
 }
