@@ -3,11 +3,12 @@
  * Retrieve temperature data from SQLite database
  */
 
+require_once __DIR__ . '/lib/database.php';
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-// Database path
-$dbPath = __DIR__ . '/../data/temperature.db';
+$dbPath = databasePath();
 
 // Get query parameters
 $hours = isset($_GET['hours']) ? intval($_GET['hours']) : 24;
@@ -32,8 +33,7 @@ if (!file_exists($dbPath)) {
 }
 
 try {
-    $db = new PDO('sqlite:' . $dbPath);
-    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $db = openDatabaseReadOnly();
 
     $cutoffTime = time() - ($hours * 3600);
 
@@ -153,13 +153,12 @@ try {
         'database_info' => $dbInfo
     ], JSON_PRETTY_PRINT);
 
-} catch (PDOException $e) {
+} catch (Throwable $e) {
     http_response_code(500);
-    echo json_encode([
-        'status'  => 'error',
-        'message' => 'Database error: ' . $e->getMessage(),
-        'data'    => [],
-        'stats'   => null
-    ]);
+    $response = databaseErrorResponse($e);
+    if (!($e instanceof RuntimeException)) {
+        $response['message'] = 'Database error: ' . $e->getMessage();
+    }
+    echo json_encode($response);
 }
 ?>

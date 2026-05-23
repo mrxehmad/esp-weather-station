@@ -1,155 +1,157 @@
 # Temperature Monitor System
 
-A complete IoT temperature monitoring system with ESP8266, captive portal, and real-time web dashboard.
+A complete temperature monitoring system using ESP8266, thermistor sensor, and web-based dashboard.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-ESP8266-orange.svg)
-![Database](https://img.shields.io/badge/database-SQLite-green.svg)
-
-## Features
-
-- **Real-time Temperature Monitoring** - Continuous environmental temperature tracking
-- **Captive Portal** - Automatic user engagement and data collection
-- **Web Dashboard** - Professional iOS-styled interface with analytics
-- **SQLite Database** - Reliable, corruption-free data storage
-- **OTA Updates** - Over-the-air firmware updates
-- **User Tracking** - Analytics on connected devices and user engagement
-- **RESTful API** - Easy integration with other services
-
-## System Architecture
+## 📁 File Structure
 
 ```
-┌─────────────┐         ┌──────────────┐         ┌─────────────┐
-│  ESP8266    │────────▶│  Web Server  │────────▶│  Dashboard  │
-│  Sensor     │  HTTP   │  PHP/SQLite  │  AJAX   │  HTML/CSS/JS│
-└─────────────┘         └──────────────┘         └─────────────┘
-      │                        │
-      │                        │
-      ▼                        ▼
-┌─────────────┐         ┌──────────────┐
-│  Captive    │         │   SQLite DB  │
-│  Portal     │         │   - Temps    │
-│  (User Data)│         │   - Users    │
-└─────────────┘         └──────────────┘
+temperature/
+├── index.html              # Main dashboard
+├── .htaccess              # Apache configuration
+├── api/
+│   ├── receive.php        # Endpoint to receive data from ESP8266 (+ Sinric Pro forward)
+│   ├── lib/
+│   │   └── SinricClient.php  # Sinric Pro REST integration
+│   └── getData.php        # Endpoint to retrieve data for dashboard
+└── data/
+    ├── sinric_config.json      # Sinric API credentials (see example)
+    ├── sinric_config.example.json
+    └── temperature_data.json  # JSON data storage (auto-created)
 ```
 
-## Hardware Requirements
-
-- **ESP8266** (NodeMCU, Wemos D1 Mini, or similar)
-- **NTC Thermistor** (10kΩ @ 25°C, Beta 3425)
-- **10kΩ Resistor** (for voltage divider)
-- **OLED Display** (128x64, SSD1306, optional)
-- **Power Supply** (5V USB or battery)
-
-### Wiring Diagram
-
-```
-ESP8266          Thermistor & Resistor
---------         ---------------------
-A0    ──────────┬──── Thermistor ──── 3.3V
-                │
-                └──── 10kΩ Resistor ── GND
-
-GPIO14 (D5) ──── SDA (OLED)
-GPIO12 (D6) ──── SCL (OLED)
-```
-
-## Software Requirements
-
-### Server
-- PHP 8.0+ with PDO SQLite extension
-- Apache/Nginx web server
-- SQLite3
-
-### ESP8266
-- Arduino IDE 1.8.19+
-- ESP8266 Board Package 3.0.0+
-- Required Libraries:
-  - Adafruit GFX
-  - Adafruit SSD1306
-  - ESP8266WiFi
-  - ESP8266HTTPClient
-  - ESP8266WebServer
-  - DNSServer
-  - ArduinoOTA
-  - NTPClient
-
-## Installation
+## 🚀 Installation
 
 ### 1. Server Setup
 
+#### Option A: Using Apache/PHP Server
+
+1. Copy the entire `temperature` folder to your web server root:
+   ```
+   /var/www/html/temperature/
+   ```
+
+2. Make sure the data directory is writable:
+   ```bash
+   chmod 755 data/
+   ```
+
+3. Ensure PHP and Apache mod_rewrite are enabled:
+   ```bash
+   sudo a2enmod rewrite
+   sudo systemctl restart apache2
+   ```
+
+#### Option B: Using PHP Built-in Server (Testing Only)
+
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/temperature-monitor.git
-cd temperature-monitor
-
-# Copy to web server directory
-sudo cp -r server/* /var/www/html/temp-station/
-
-# Install PHP SQLite extension (if needed)
-sudo apt-get install php-sqlite3
-
-# Set permissions
-cd /var/www/html/temp-station
-sudo chown -R www-data:www-data .
-sudo chmod 755 data api
-sudo chmod 644 api/*.php index.html
-
-# Initialize database
-sudo php api/init_database.php
-
-# Restart web server
-sudo systemctl restart apache2
+cd temperature
+php -S 0.0.0.0:8080
 ```
 
-### 2. ESP8266 Setup
+### 2. ESP8266 Configuration
+
+Firmware POST format (matches `receive.php`):
+
+```json
+{"temperature":21.70,"rssi":-62,"boot_count":12,"fails":0}
+```
+
+Required server response field: **`update_mode`** (boolean).  
+`false` = modem sleep (10 min interval). `true` = stay awake for OTA / recovery.
+
+**Important:** use **HTTPS** if your host redirects HTTP → HTTPS (otherwise ESP may get HTTP 301 and treat send as failed):
 
 ```cpp
-// 1. Open esp8266/temperature_monitor.ino in Arduino IDE
-
-// 2. Configure your WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// 3. Set your server URL
-const char* tempDataURL = "http://YOUR_SERVER_IP/temp-station/api/receive.php";
-const char* userDataURL = "http://YOUR_SERVER_IP/temp-station/api/receive_user.php";
-
-// 4. Upload to ESP8266
+static const char SERVER_URL[] PROGMEM = "https://temp.ehmi.se/api/receive.php";
 ```
 
-## Configuration
+Check last ESP contact:
 
-### Temperature Sensor Calibration
-
-Adjust these constants in the ESP8266 code:
-
-```cpp
-const float B_COEFFICIENT = 3425.0;  // Beta value for your thermistor
-const float NOMINAL_RESISTANCE = 10000.0;  // Resistance at 25°C
-const float NOMINAL_TEMPERATURE = 25.0;  // Reference temperature
+```
+GET https://temp.ehmi.se/api/device_status.php
 ```
 
-### Display Settings
+Test with curl (full firmware payload):
 
-```cpp
-const bool DISPLAY_ENABLED = false;  // Set to true to enable OLED
+```bash
+curl -sS -X POST "https://temp.ehmi.se/api/receive.php" \
+  -H "Content-Type: application/json" \
+  -d '{"temperature":21.7,"rssi":-58,"boot_count":42,"fails":0}'
 ```
 
-### Data Upload Interval
+### 3. Access Dashboard
 
-```cpp
-const unsigned long SEND_INTERVAL = 10 * 60 * 1000;  // 10 minutes (in milliseconds)
+Open your browser and navigate to:
+```
+http://YOUR_SERVER_IP/temperature/
 ```
 
-## API Endpoints
+## 📊 Dashboard Features
 
-### Temperature Data
+- **Real-time Statistics**
+  - Current temperature
+  - Average temperature
+  - Min/Max values
+  - Total readings
 
-**POST** `/api/receive.php`
+- **Interactive Charts**
+  - Temperature over time (line chart)
+  - Temperature distribution (histogram)
+  - Time filters: 1H, 6H, 24H, 3D, 7D
+
+- **Auto-refresh**
+  - Dashboard refreshes every 5 minutes
+  - Manual refresh button available
+
+## 🏠 Sinric Pro (Alexa / Google Home)
+
+When the ESP posts temperature to `receive.php`, the server can forward the reading to [Sinric Pro](https://sinric.pro) so voice assistants see live temperature.
+
+### Setup
+
+1. In [Sinric Pro Portal](https://portal.sinric.pro), create a **Temperature Sensor** device and note its **Device ID**.
+2. Create an **API Key**: [Credentials → New API Key](https://portal.sinric.pro/credential/new/apikey).
+3. Copy `data/sinric_config.example.json` to `data/sinric_config.json` (or edit the existing file).
+4. Set your values and enable the integration:
+
 ```json
 {
-  "temperature": 25.5
+    "enabled": true,
+    "api_key": "your-api-key-here",
+    "device_id": "your-temperature-sensor-device-id",
+    "min_interval_seconds": 60
+}
+```
+
+Sinric limits sensor events (about once per 60 seconds). `min_interval_seconds` matches that so extra ESP posts are still stored locally but only forwarded when the interval allows.
+
+### Flow
+
+```
+ESP8266  --POST-->  receive.php  --stores-->  SQLite
+                         |
+                         +--event-->  api.sinric.pro  (currentTemperature)
+```
+
+The ESP response may include a `sinric` object when forwarding is enabled (success, skipped due to rate limit, or error).
+
+## 🔌 API Endpoints
+
+### POST /api/receive.php
+Receives temperature data from ESP8266
+
+**Request:**
+```json
+{
+  "timestamp": 1738368000,
+  "samples": [
+    {"temp": 18.50, "offset": 0},
+    {"temp": 18.60, "offset": 300},
+    {"temp": 18.55, "offset": 600},
+    {"temp": 18.70, "offset": 900},
+    {"temp": 18.65, "offset": 1200},
+    {"temp": 18.80, "offset": 1500}
+  ]
 }
 ```
 
@@ -157,32 +159,22 @@ const unsigned long SEND_INTERVAL = 10 * 60 * 1000;  // 10 minutes (in milliseco
 ```json
 {
   "status": "success",
-  "message": "Temperature stored",
-  "temperature": 25.5,
-  "total_records": 245
+  "message": "Data stored successfully",
+  "samples_received": 6
 }
 ```
 
-### User Data
+### GET /api/getData.php
+Retrieves temperature data for dashboard
 
-**POST** `/api/receive_user.php`
-```json
-{
-  "users": [
-    {
-      "mac": "192.168.4.2",
-      "email": "user@example.com",
-      "phone": "+1234567890",
-      "connect_time": 1738368000,
-      "duration": 300
-    }
-  ]
-}
+**Parameters:**
+- `hours` (optional): Number of hours to retrieve (default: 24)
+- `limit` (optional): Maximum number of readings (default: 1000)
+
+**Example:**
 ```
-
-### Get Temperature Data
-
-**GET** `/api/getData.php?hours=24`
+GET /api/getData.php?hours=24
+```
 
 **Response:**
 ```json
@@ -191,198 +183,116 @@ const unsigned long SEND_INTERVAL = 10 * 60 * 1000;  // 10 minutes (in milliseco
   "data": [
     {
       "timestamp": 1738368000,
-      "temperature": 25.5,
+      "temperature": 18.50,
       "received_at": 1738368010
     }
   ],
   "stats": {
-    "current": 25.5,
-    "min": 18.2,
-    "max": 28.4,
-    "avg": 23.1,
-    "total_readings": 1440
+    "current": 18.80,
+    "min": 18.50,
+    "max": 18.80,
+    "avg": 18.65,
+    "total_readings": 6
+  },
+  "filter": {
+    "hours": 24,
+    "from": "2026-01-30 12:00:00",
+    "to": "2026-01-31 12:00:00"
   }
 }
 ```
 
-### Get User Data
+## 🔧 Troubleshooting
 
-**GET** `/api/getUserData.php?hours=168`
+### ESP8266 Can't Connect to Server
 
-**Response:**
-```json
-{
-  "status": "success",
-  "data": [...],
-  "stats": {
-    "total_users": 45,
-    "unique_devices": 32,
-    "users_with_email": 18,
-    "users_with_phone": 12,
-    "connections_24h": 8
-  }
+1. Check your server IP address
+2. Make sure the server is accessible from ESP8266's network
+3. Check firewall settings
+4. Verify the URL is correct (include `/api/receive.php`)
+
+### Dashboard Shows "No Data Available"
+
+1. Wait for first hourly data transmission from ESP8266
+2. Check if `data/temperature_data.json` file exists
+3. Verify file permissions on the data directory
+
+### Permission Errors (`readonly database`)
+
+PHP runs as `www-data`, but files deployed as **root** cannot be written. Fix on the server:
+
+```bash
+cd /var/www/temp-station
+sudo bash scripts/fix-permissions.sh
+```
+
+Or manually:
+
+```bash
+sudo chown -R www-data:www-data /var/www/temp-station/data
+sudo chmod 775 /var/www/temp-station/data
+sudo chmod 664 /var/www/temp-station/data/temperature.db
+sudo chmod 664 /var/www/temp-station/data/settings.json
+sudo chmod 664 /var/www/temp-station/data/sinric_config.json
+```
+
+Then reload: `https://your-host/api/getData.php?hours=24`
+
+## 📈 Data Storage
+
+- Data is stored in JSON format in `data/temperature_data.json`
+- Automatically keeps last 1000 entries
+- Each entry contains:
+  - Received timestamp
+  - Device timestamp from ESP8266
+  - Array of 6 temperature samples (30 minutes)
+
+## 🎨 Customization
+
+### Change Temperature Units
+
+Edit `index.html` to display Fahrenheit:
+
+```javascript
+// In updateStats function
+document.getElementById('stat-current').innerHTML = 
+    `${(stats.current * 9/5 + 32).toFixed(1)}<span class="stat-unit">°F</span>`;
+```
+
+### Adjust Data Retention
+
+Edit `api/receive.php`:
+
+```php
+// Keep only last 1000 entries (change this number)
+if (count($allData) > 1000) {
+    $allData = array_slice($allData, -1000);
 }
 ```
 
-## Database Schema
+### Change Chart Colors
 
-### `temperature_data`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| received_at | INTEGER | Unix timestamp (server time) |
-| device_timestamp | INTEGER | Unix timestamp (device time) |
-| created_at | DATETIME | Auto-generated timestamp |
+Edit the Chart.js configuration in `index.html`:
 
-### `temperature_samples`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| data_id | INTEGER | Foreign key to temperature_data |
-| temperature | REAL | Temperature in Celsius |
-| offset | INTEGER | Seconds offset from batch start |
-
-### `connected_users`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Primary key |
-| mac_address | TEXT | Device identifier |
-| device_name | TEXT | Device name |
-| email | TEXT | User email (optional) |
-| phone | TEXT | User phone (optional) |
-| connect_time | INTEGER | Connection timestamp |
-| duration | INTEGER | Connection duration (seconds) |
-| received_at | INTEGER | Server received timestamp |
-
-## OTA Updates
-
-The ESP8266 supports Over-The-Air updates for easy firmware upgrades without physical access.
-
-### Using Arduino IDE
-
-1. Connect to the ESP8266's WiFi network (ESP_XXXXXX)
-2. Tools → Port → Network Ports → TempMonitor
-3. Upload sketch normally
-4. Enter password: `admin123`
-
-### Security Note
-
-Change the default OTA password in production:
-```cpp
-ArduinoOTA.setPassword("YOUR_SECURE_PASSWORD");
+```javascript
+borderColor: '#667eea',  // Change line color
+backgroundColor: 'rgba(102, 126, 234, 0.1)',  // Change fill color
 ```
 
-## Captive Portal
+## 📝 Notes
 
-When users connect to the ESP8266's WiFi network, they are automatically redirected to a web portal where they can:
-- View current temperature
-- Submit contact information (email/phone)
-- Access temperature data via JSON endpoint
+- ESP8266 connects to WiFi only when sending data (hourly)
+- Takes temperature samples every 5 minutes
+- Sends 30 minutes of data (6 samples) every hour
+- Dashboard auto-refreshes every 5 minutes
+- Data persists across server restarts
 
-The captive portal works on iOS, Android, and desktop devices.
+## 🔒 Security Recommendations
 
-## Dashboard Features
-
-- **Temperature Tab**
-  - Real-time temperature display
-  - Historical trends chart
-  - Temperature distribution histogram
-  - Time range filters (1H, 6H, 24H, 3D, 7D)
-
-- **Users Tab**
-  - Total connections and unique devices
-  - User contact information (emails/phones collected)
-  - Connection duration statistics
-  - Recent connections table
-
-## Database Management
-
-### Show Database Info
-```bash
-sudo php api/manage_database.php info
-```
-
-### View Statistics
-```bash
-sudo php api/manage_database.php stats
-```
-
-### Clean Old Data
-```bash
-sudo php api/manage_database.php cleanup 30  # Keep last 30 days
-```
-
-### Optimize Database
-```bash
-sudo php api/manage_database.php vacuum
-```
-
-### Export to JSON
-```bash
-sudo php api/manage_database.php export backup.json
-```
-
-### Import from JSON
-```bash
-sudo php api/manage_database.php import backup.json
-```
-
-## Troubleshooting
-
-### ESP8266 Won't Connect to WiFi
-- Check SSID and password in code
-- Verify WiFi network is 2.4GHz (ESP8266 doesn't support 5GHz)
-- Check signal strength (move closer to router)
-
-### Server Returns 404
-- Verify file paths in ESP8266 code
-- Check Apache virtual host configuration
-- Ensure API files are in correct directory
-
-### Database Locked Error
-- Check file permissions on database file
-- Ensure www-data user owns database
-- WAL mode should prevent most locking issues
-
-### Temperature Readings Incorrect
-- Verify thermistor specifications (Beta value)
-- Check wiring and connections
-- Calibrate B_COEFFICIENT constant
-
-## Performance
-
-- **Database**: Handles 100,000+ temperature readings efficiently
-- **Response Time**: API responds in <50ms for most queries
-- **Storage**: ~1KB per temperature reading (with SQLite overhead)
-- **Concurrent Users**: Supports 50+ simultaneous captive portal connections
-
-## Security Recommendations
-
-For production deployment:
-
-1. **Use HTTPS** - Encrypt all communication
-2. **Change OTA Password** - Use strong password
-3. **Add API Authentication** - Implement token-based auth
-4. **Rate Limiting** - Prevent abuse
-5. **Input Validation** - Already implemented, review regularly
-6. **Database Backups** - Regular automated backups
-7. **Restrict API Access** - Use firewall rules if needed
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- ESP8266 Community for excellent documentation
-- Adafruit for display libraries
-- Chart.js for beautiful graphs
-- SQLite for reliable database engine
-
-## Support
-
-For issues and questions Open an issue on GitHub.
+For production use:
+1. Use HTTPS instead of HTTP
+2. Add authentication to API endpoints
+3. Implement rate limiting
+4. Store data in a proper database
+5. Add input validation and sanitization
+6. Regular backups of temperature_data.json
