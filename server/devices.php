@@ -1,93 +1,92 @@
 <?php
-/**
- * Devices list page - WordPress 2020 admin style
- */
 
-require_once __DIR__ . '/api/includes/db.php';
-require_once __DIR__ . '/api/includes/functions.php';
+require_once __DIR__ . '/includes/functions.php';
+
+$pdo = db();
+
+$devices = $pdo->query('
+    SELECT *
+    FROM devices
+    ORDER BY last_seen DESC
+')->fetchAll();
 
 $pageTitle = 'Devices';
-$currentPage = 'devices';
 
-try {
-    $db = getDb();
-    
-    // Get all devices with their latest status
-    $stmt = $db->query('
-        SELECT d.*, 
-               (SELECT consec_fails FROM readings WHERE chip_id = d.chip_id ORDER BY ts DESC LIMIT 1) as consec_fails
-        FROM devices d
-        ORDER BY d.last_seen DESC
-    ');
-    $devices = $stmt->fetchAll();
-    
-} catch (Throwable $e) {
-    $error = $e->getMessage();
-}
+include __DIR__ . '/includes/header.php';
 
-include __DIR__ . '/api/includes/header.php';
 ?>
 
-<div class="wrap">
-    <h1>Devices</h1>
-    
-    <?php if (isset($error)): ?>
-        <div class="alert-row alert-danger">
-            <div class="alert-message">Database error: <?php echo e($error); ?></div>
-        </div>
-    <?php else: ?>
-    
-    <table class="wp-list-table">
-        <thead>
-            <tr>
-                <th>Device</th>
-                <th>Firmware</th>
-                <th>Temp</th>
-                <th>RSSI</th>
-                <th>Heap (min)</th>
-                <th>WiFi Reconnects</th>
-                <th>Boot Count</th>
-                <th>Last Seen</th>
-                <th>Status</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (empty($devices)): ?>
-            <tr>
-                <td colspan="10" style="text-align:center;padding:40px;">No devices registered yet</td>
-            </tr>
-            <?php else: ?>
-                <?php foreach ($devices as $device): 
-                    $status = getDeviceStatus($device);
-                ?>
-                <tr>
-                    <td>
-                        <strong><?php echo e($device['chip_id']); ?></strong><br>
-                        <small class="text-muted"><?php echo e($device['device_name'] ?? ''); ?></small>
-                    </td>
-                    <td><?php echo e($device['fw'] ?? '-'); ?></td>
-                    <td><?php echo $device['last_temp'] ? number_format($device['last_temp'], 1) . ' °C' : '-'; ?></td>
-                    <td><?php echo $device['last_rssi'] ? $device['last_rssi'] . ' dBm' : '-'; ?></td>
-                    <td><?php echo $device['heap_min'] ? formatBytes($device['heap_min']) : '-'; ?></td>
-                    <td><?php echo $device['wifi_reconnects'] ?? '0'; ?></td>
-                    <td><?php echo $device['boot_count'] ?? '0'; ?></td>
-                    <td><?php echo formatAgo($device['last_seen']); ?></td>
-                    <td>
-                        <span class="status-pill status-<?php echo e($status['class']); ?>">
-                            <?php echo e($status['status']); ?>
-                        </span>
-                    </td>
-                    <td>
-                        <a href="device.php?chip=<?php echo urlencode($device['chip_id']); ?>" class="button">View</a>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </tbody>
-    </table>
-    
-    <?php endif; ?>
-</div>
+<?php if (empty($devices)): ?>
 
-<?php include __DIR__ . '/api/includes/footer.php'; ?>
+    <div class="notice">
+        No devices found yet.
+    </div>
+
+<?php else: ?>
+
+    <div class="table-card">
+        <table class="list">
+            <thead>
+                <tr>
+                    <th>Device</th>
+                    <th>FW</th>
+                    <th>Temp</th>
+                    <th>RSSI</th>
+                    <th>Heap min</th>
+                    <th>WiFi reconnects</th>
+                    <th>Boots</th>
+                    <th>Uploads OK / Total</th>
+                    <th>Last seen</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                <?php foreach ($devices as $d): ?>
+                    <?php
+                    $status = device_status($d);
+                    $temp = $d['last_temp'] !== null
+                        ? number_format((float)$d['last_temp'], 1) . ' °C'
+                        : '—';
+                    ?>
+                    <tr>
+                        <td>
+                            <a href="device.php?chip=<?php echo e(urlencode($d['chip_id'])); ?>">
+                                <?php echo e(display_device_name($d)); ?>
+                            </a>
+                            <div class="muted">
+                                <?php echo e($d['chip_id']); ?>
+                            </div>
+                        </td>
+
+                        <td><?php echo e($d['fw'] ?: '—'); ?></td>
+                        <td><?php echo e($temp); ?></td>
+                        <td><?php echo $d['last_rssi'] !== null ? e((int)$d['last_rssi'] . ' dBm') : '—'; ?></td>
+                        <td><?php echo e(format_bytes($d['heap_min'])); ?></td>
+                        <td><?php echo e((string)(int)($d['wifi_reconnects'] ?? 0)); ?></td>
+                        <td><?php echo e((string)(int)($d['boot_count'] ?? 0)); ?></td>
+
+                        <td>
+                            <?php
+                            $ok = (int)($d['ok_uploads'] ?? 0);
+                            $total = (int)($d['total_uploads'] ?? 0);
+                            echo e($total > 0 ? $ok . ' / ' . $total : '—');
+                            ?>
+                        </td>
+
+                        <td><?php echo e(ago($d['last_seen'])); ?></td>
+
+                        <td>
+                            <span class="pill <?php echo e($status['class']); ?>">
+                                <?php echo e($status['label']); ?>
+                            </span>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+<?php endif; ?>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>

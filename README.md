@@ -1,298 +1,392 @@
-# Temperature Monitor System
+# 🌡️ ESP8266 Weather Station
 
-A complete temperature monitoring system using ESP8266, thermistor sensor, and web-based dashboard.
+**A self-hosted temperature monitoring system: an ESP8266 sensor node that reports to a bare-PHP + SQLite dashboard.**
 
-## 📁 File Structure
+Built for unattended 24/7 operation on a remote, occasionally-unstable WiFi link. The firmware is designed around one rule: *never need a human*. It reconnects, backs off, validates its own sensor readings, guards its own heap, and reboots itself when nothing else works.
+
+[![Platform](https://img.shields.io/badge/platform-ESP8266-blue)](https://github.com/esp8266/Arduino)
+[![Firmware](https://img.shields.io/badge/firmware-Arduino_C%2B%2B-00979D)](esp8266/esp8266.ino)
+[![Server](https://img.shields.io/badge/server-PHP_%2B_SQLite-777BB4)](server/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+---
+
+## Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Repository Structure](#repository-structure)
+- [Hardware](#hardware)
+- [Firmware Setup](#firmware-setup)
+- [Server Setup](#server-setup)
+- [Device Web Interface](#device-web-interface)
+- [API](#api)
+- [Reliability Design](#reliability-design)
+- [Calibration](#calibration)
+- [Security Notes](#security-notes)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
+## Overview
+
+The system has two halves:
+
+| Component | Stack | Location |
+|---|---|---|
+| **Sensor node** | ESP8266 + NTC 10k thermistor, Arduino C++ | [`esp8266/`](esp8266/) |
+| **Server** | Bare PHP 7.4+, SQLite3, vanilla JS + Chart.js | [`server/`](server/) |
+
+The node samples the thermistor every 2 seconds (32-sample averaged), and POSTs a JSON telemetry packet to the server every 10 minutes. The server stores it in SQLite and presents a WordPress-2020-style admin dashboard with charts, device health, and a raw reading log.
+
+The node also hosts its **own** mini web dashboard at its IP address, so it remains fully diagnosable even if the server or internet is down.
+
+## Features
+
+### Firmware
+- 🔁 **Non-blocking WiFi state machine** — OTA and the web UI stay alive during reconnects
+- 📈 **Exponential backoff** — separate retry curves for WiFi (5 s → 15 min) and uploads (10 s → 15 min)
+- 🧠 **Self-healing** — auto-reboot after 20 consecutive upload failures or when free heap drops below 8 KB
+- ⏱️ **Scheduled 24 h reboot** — clears any accumulated state before it matters
+- 🌡️ **32× ADC oversampling + spike rejection** — a single glitch reading (22 → 68 → 22 °C) is ignored unless it persists for 3 consecutive samples
+- 💾 **Zero routine flash writes** — lifetime counters live in RTC memory, not EEPROM
+- 📡 **OTA updates**, mDNS (`tempmonitor.local`), optional HTTPS with fingerprint pinning
+- 🔌 **On-device dashboard** at `/` with live status, plus `/send`, `/temp`, `/reset`
+
+### Server
+- 📥 **Single ingest endpoint** (`api/receive.php`) with backward-compatible payload handling
+- 🗄️ **SQLite storage** — zero configuration, one file, WAL mode for concurrency
+- 📊 **Dashboard** — temperature/RSSI charts, device list, per-device detail with 7-day history
+- 🚨 **Health page** — automatic alerts for offline devices, low heap, crash-loop reset reasons, reconnect storms
+- 📜 **Reading log** with raw JSON payloads
+- 🧹 **Retention cleanup** via `cron_cleanup.php` (default 90 days)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Node["ESP8266 Node"]
+        T["NTC 10k Thermistor"] --> ADC["32x ADC Averaging"]
+        ADC --> F["Spike Filter"]
+        F --> P["JSON Telemetry"]
+        W["WiFi State Machine"] --> P
+        D["On-device Dashboard :80"]
+        O["OTA Handler"]
+    end
+
+    subgraph Server["PHP Server"]
+        R["api/receive.php"] --> SQ[("SQLite WAL")]
+        SQ --> UI["Dashboard Pages"]
+        UI --> C["Chart.js"]
+    end
+
+    P -->|"POST every 10 min"| R
+    R -->|"status ok"| P
+    B["Browser"] --> UI
+    B2["Browser / Phone"] --> D
+```
+
+## Repository Structure
 
 ```
-temperature/
-├── index.html              # Main dashboard
-├── .htaccess              # Apache configuration
-├── api/
-│   ├── receive.php        # Endpoint to receive data from ESP8266 (+ Sinric Pro forward)
-│   ├── lib/
-│   │   └── SinricClient.php  # Sinric Pro REST integration
-│   └── getData.php        # Endpoint to retrieve data for dashboard
-└── data/
-    ├── sinric_config.json      # Sinric API credentials (see example)
-    ├── sinric_config.example.json
-    └── temperature_data.json  # JSON data storage (auto-created)
+esp-weather-station/
+├── esp8266/
+│   └── esp8266.ino              # Complete firmware (single file)
+│
+├── server/
+│   ├── api/
+│   │   └── receive.php          # Telemetry ingest endpoint
+│   ├── assets/
+│   │   ├── css/admin.css        # WordPress-2020-style theme
+│   │   └── js/charts.js         # Chart.js helpers
+│   ├── data/                    # SQLite database lives here (git-ignored)
+│   │   └── .htaccess            # Blocks direct DB download
+│   ├── includes/
+│   │   ├── config.php           # ← EDIT THIS
+│   │   ├── db.php               # PDO + auto schema creation
+│   │   ├── functions.php        # Formatting / status helpers
+│   │   ├── header.php
+│   │   ├── sidebar.php
+│   │   └── footer.php
+│   ├── index.php                # Dashboard
+│   ├── devices.php              # Device list
+│   ├── device.php               # Per-device detail + charts
+│   ├── health.php               # Alerts
+│   ├── log.php                  # Reading log
+│   └── cron_cleanup.php         # Retention cleanup (CLI)
+│
+├── docs/
+│   ├── API_DOCUMENTATION.md     # Payload schema + response contract
+│   └── HARDWARE_SETUP.md        # Wiring guide
+│
+├── LICENSE
+├── README.md
+└── .gitignore
 ```
 
-## 🚀 Installation
+## Hardware
 
-### 1. Server Setup
+| Qty | Part | Notes |
+|---|---|---|
+| 1 | ESP8266 board | Wemos D1 Mini / NodeMCU / ESP-12 — 4 MB flash recommended |
+| 1 | NTC thermistor | 10 kΩ @ 25 °C, B = 3425 |
+| 1 | Resistor | 10 kΩ, 1% tolerance preferred |
+| 1 | SSD1306 OLED *(optional)* | 128×64, I²C — disabled by default in firmware |
+| – | Breadboard / wires / USB power | |
 
-#### Option A: Using Apache/PHP Server
+### Wiring
 
-1. Copy the entire `temperature` folder to your web server root:
-   ```
-   /var/www/html/temperature/
-   ```
+**Thermistor voltage divider** (thermistor high-side, resistor to ground):
 
-2. Make sure the data directory is writable:
-   ```bash
-   chmod 755 data/
-   ```
-
-3. Ensure PHP and Apache mod_rewrite are enabled:
-   ```bash
-   sudo a2enmod rewrite
-   sudo systemctl restart apache2
-   ```
-
-#### Option B: Using PHP Built-in Server (Testing Only)
-
-```bash
-cd temperature
-php -S 0.0.0.0:8080
+```
+3V3 ──┬── [ NTC 10k ] ──┬── A0
+      │                 │
+      │              [ 10k ]
+      │                 │
+GND ──┴─────────────────┴── GND
 ```
 
-### 2. ESP8266 Configuration
+**Optional OLED (I²C):**
 
-Firmware POST format (matches `receive.php`):
+| OLED | ESP8266 |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SDA | GPIO14 (D5) |
+| SCL | GPIO12 (D6) |
 
-```json
-{"temperature":21.70,"rssi":-62,"boot_count":12,"fails":0}
-```
+Full assembly notes: [`docs/HARDWARE_SETUP.md`](docs/HARDWARE_SETUP.md)
 
-Required server response field: **`update_mode`** (boolean).  
-`false` = modem sleep (10 min interval). `true` = stay awake for OTA / recovery.
+## Firmware Setup
 
-**Important:** use **HTTPS** if your host redirects HTTP → HTTPS (otherwise ESP may get HTTP 301 and treat send as failed):
+### 1. Install the toolchain
+
+1. [Arduino IDE](https://www.arduino.cc/en/software)
+2. ESP8266 board package — add to *Additional Boards Manager URLs*:
+   ```
+   http://arduino.esp8266.com/stable/package_esp8266com_index.json
+   ```
+   then install **esp8266 ≥ 3.0** from Boards Manager.
+3. Libraries (Library Manager): **Adafruit GFX**, **Adafruit SSD1306** *(only needed if you enable the OLED)*.
+
+### 2. Board settings
+
+| Setting | Value |
+|---|---|
+| Board | LOLIN(WEMOS) D1 R2 & Mini *(or your board)* |
+| CPU Frequency | 80 MHz |
+| Flash Size | **4 MB (FS:1MB or FS:0)** — OTA needs headroom |
+| Upload Speed | 115200 |
+
+### 3. Configure
+
+Open [`esp8266/esp8266.ino`](esp8266/esp8266.ino) and edit the top section:
 
 ```cpp
-static const char SERVER_URL[] PROGMEM = "https://temp.ehmi.se/api/receive.php";
+static const char WIFI_SSID_P[]     PROGMEM = "YourSSID";
+static const char WIFI_PASSWORD_P[] PROGMEM = "YourPassword";
+
+static const char SERVER_URL[] PROGMEM =
+  "http://your-server/api/receive.php";
 ```
 
-Check last ESP contact:
+| Constant | Default | Meaning |
+|---|---|---|
+| `SEND_INTERVAL_BASE` | 10 min | Normal upload interval |
+| `UPLOAD_RETRY_MAX` | 15 min | Backoff cap after failed uploads |
+| `WIFI_RETRY_MAX` | 15 min | Backoff cap after failed connects |
+| `MAX_CONSECUTIVE_FAILURES` | 20 | Reboots after this many failed uploads |
+| `LOW_HEAP_THRESHOLD` | 8000 B | Reboots below this free heap |
+| `ADC_SAMPLES` | 32 | Samples averaged per reading |
+| `CAL_OFFSET` | −8.0 | Temperature calibration — see [Calibration](#calibration) |
+| `DISPLAY_ENABLED` | 0 | Set 1 to enable the OLED |
+| `USE_HTTPS` | 0 | Set 1 + fingerprint for TLS pinning |
 
-```
-GET https://temp.ehmi.se/api/device_status.php
-```
+### 4. Flash
 
-Test with curl (full firmware payload):
+Connect via USB → select port → **Upload**. First boot connects, then POSTs immediately.
+
+## Server Setup
+
+### Requirements
+
+- PHP **≥ 7.4** with `pdo_sqlite`
+- SQLite **≥ 3.24** (for `ON CONFLICT` upserts)
+- Apache or Nginx
+
+### 1. Deploy
+
+Copy `server/` into your web root:
 
 ```bash
-curl -sS -X POST "https://temp.ehmi.se/api/receive.php" \
-  -H "Content-Type: application/json" \
-  -d '{"temperature":21.7,"rssi":-58,"boot_count":42,"fails":0}'
+scp -r server/ user@your-server:/var/www/tempstation/
 ```
 
-### 3. Access Dashboard
+### 2. Permissions
 
-Open your browser and navigate to:
-```
-http://YOUR_SERVER_IP/temperature/
-```
-
-## 📊 Dashboard Features
-
-- **Real-time Statistics**
-  - Current temperature
-  - Average temperature
-  - Min/Max values
-  - Total readings
-
-- **Interactive Charts**
-  - Temperature over time (line chart)
-  - Temperature distribution (histogram)
-  - Time filters: 1H, 6H, 24H, 3D, 7D
-
-- **Auto-refresh**
-  - Dashboard refreshes every 5 minutes
-  - Manual refresh button available
-
-## 🏠 Sinric Pro (Alexa / Google Home)
-
-When the ESP posts temperature to `receive.php`, the server can forward the reading to [Sinric Pro](https://sinric.pro) so voice assistants see live temperature.
-
-### Setup
-
-1. In [Sinric Pro Portal](https://portal.sinric.pro), create a **Temperature Sensor** device and note its **Device ID**.
-2. Create an **API Key**: [Credentials → New API Key](https://portal.sinric.pro/credential/new/apikey).
-3. Copy `data/sinric_config.example.json` to `data/sinric_config.json` (or edit the existing file).
-4. Set your values and enable the integration:
-
-```json
-{
-    "enabled": true,
-    "api_key": "your-api-key-here",
-    "device_id": "your-temperature-sensor-device-id",
-    "min_interval_seconds": 60
-}
-```
-
-Sinric limits sensor events (about once per 60 seconds). `min_interval_seconds` matches that so extra ESP posts are still stored locally but only forwarded when the interval allows.
-
-### Flow
-
-```
-ESP8266  --POST-->  receive.php  --stores-->  SQLite
-                         |
-                         +--event-->  api.sinric.pro  (currentTemperature)
-```
-
-The ESP response may include a `sinric` object when forwarding is enabled (success, skipped due to rate limit, or error).
-
-## 🔌 API Endpoints
-
-### POST /api/receive.php
-Receives temperature data from ESP8266
-
-**Request:**
-```json
-{
-  "timestamp": 1738368000,
-  "samples": [
-    {"temp": 18.50, "offset": 0},
-    {"temp": 18.60, "offset": 300},
-    {"temp": 18.55, "offset": 600},
-    {"temp": 18.70, "offset": 900},
-    {"temp": 18.65, "offset": 1200},
-    {"temp": 18.80, "offset": 1500}
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Data stored successfully",
-  "samples_received": 6
-}
-```
-
-### GET /api/getData.php
-Retrieves temperature data for dashboard
-
-**Parameters:**
-- `hours` (optional): Number of hours to retrieve (default: 24)
-- `limit` (optional): Maximum number of readings (default: 1000)
-
-**Example:**
-```
-GET /api/getData.php?hours=24
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": [
-    {
-      "timestamp": 1738368000,
-      "temperature": 18.50,
-      "received_at": 1738368010
-    }
-  ],
-  "stats": {
-    "current": 18.80,
-    "min": 18.50,
-    "max": 18.80,
-    "avg": 18.65,
-    "total_readings": 6
-  },
-  "filter": {
-    "hours": 24,
-    "from": "2026-01-30 12:00:00",
-    "to": "2026-01-31 12:00:00"
-  }
-}
-```
-
-## 🔧 Troubleshooting
-
-### ESP8266 Can't Connect to Server
-
-1. Check your server IP address
-2. Make sure the server is accessible from ESP8266's network
-3. Check firewall settings
-4. Verify the URL is correct (include `/api/receive.php`)
-
-### Dashboard Shows "No Data Available"
-
-1. Wait for first hourly data transmission from ESP8266
-2. Check if `data/temperature_data.json` file exists
-3. Verify file permissions on the data directory
-
-### Permission Errors (`readonly database`)
-
-PHP runs as `www-data`, but files deployed as **root** cannot be written. Fix on the server:
+The web server user must write to `data/`:
 
 ```bash
-cd /var/www/temp-station
-sudo bash scripts/fix-permissions.sh
+sudo chown -R www-data:www-data server/data
+chmod 775 server/data
 ```
 
-Or manually:
+The database file is created automatically on first request.
+
+### 3. Verify the database is protected
 
 ```bash
-sudo chown -R www-data:www-data /var/www/temp-station/data
-sudo chmod 775 /var/www/temp-station/data
-sudo chmod 664 /var/www/temp-station/data/temperature.db
-sudo chmod 664 /var/www/temp-station/data/settings.json
-sudo chmod 664 /var/www/temp-station/data/sinric_config.json
+curl -I http://your-server/data/tempstation.sqlite3
+# → must return 403, never 200
 ```
 
-Then reload: `https://your-host/api/getData.php?hours=24`
-
-## 📈 Data Storage
-
-- Data is stored in JSON format in `data/temperature_data.json`
-- Automatically keeps last 1000 entries
-- Each entry contains:
-  - Received timestamp
-  - Device timestamp from ESP8266
-  - Array of 6 temperature samples (30 minutes)
-
-## 🎨 Customization
-
-### Change Temperature Units
-
-Edit `index.html` to display Fahrenheit:
-
-```javascript
-// In updateStats function
-document.getElementById('stat-current').innerHTML = 
-    `${(stats.current * 9/5 + 32).toFixed(1)}<span class="stat-unit">°F</span>`;
-```
-
-### Adjust Data Retention
-
-Edit `api/receive.php`:
+For stronger isolation, move the DB outside the web root in `includes/config.php`:
 
 ```php
-// Keep only last 1000 entries (change this number)
-if (count($allData) > 1000) {
-    $allData = array_slice($allData, -1000);
+const DB_FILE = '/var/lib/tempstation/tempstation.sqlite3';
+```
+
+### 4. Configuration — `includes/config.php`
+
+| Constant | Default | Meaning |
+|---|---|---|
+| `APP_NAME` | `Temp Station` | Dashboard title |
+| `DB_FILE` | `../data/tempstation.sqlite3` | SQLite path |
+| `TIMEZONE` | `UTC` | Display timezone |
+| `RETENTION_DAYS` | `90` | Readings older than this are purged |
+| `DEVICE_KEY` | `''` *(off)* | Optional shared secret (`X-Device-Key` header) |
+
+### 5. Retention cron (optional)
+
+```bash
+0 3 * * * php /var/www/tempstation/cron_cleanup.php
+```
+
+*(Cleanup also runs probabilistically inside `receive.php`, so this is optional.)*
+
+### 6. Smoke test
+
+```bash
+curl -i -X POST http://your-server/api/receive.php \
+  -H "Content-Type: application/json" \
+  -d '{"temperature":21.45,"rssi":-61,"boot_count":1,"fails":0}'
+# → HTTP 200  {"status":"ok","reading_id":1}
+```
+
+Open `http://your-server/` — the device should appear within one upload cycle.
+
+## Device Web Interface
+
+The node hosts its own dashboard at `http://<device-ip>/` (also `http://tempmonitor.local/` via mDNS):
+
+| Endpoint | Purpose |
+|---|---|
+| `/` | Live status: temperature, heap, WiFi, upload stats, charts |
+| `/send` | Trigger an immediate upload |
+| `/temp` | Machine-readable JSON telemetry |
+| `/reset` | Reboot the node |
+
+## API
+
+Full schema: [`docs/API_DOCUMENTATION.md`](docs/API_DOCUMENTATION.md)
+
+### Current payload (schema v1)
+
+```json
+{
+  "temperature": 21.45, "rssi": -61, "boot_count": 12, "fails": 0,
+  "schema": 1, "device": "TempMonitor", "fw": "3.0.0",
+  "chip_id": "DC8109", "mac": "EC:64:C9:DC:81:09", "ip": "10.1.1.11",
+  "uptime_s": 86412, "temp_c": 21.45, "adc_raw": 512, "adc_samples": 32,
+  "spike_rejects": 3, "channel": 6, "bssid": "F8:AA:3F:15:DD:E6",
+  "wifi_state": "connected", "wifi_reconnects": 4,
+  "consec_fails": 0, "total_uploads": 140, "ok_uploads": 139,
+  "fail_uploads": 1, "ota_updates": 2,
+  "heap": 40344, "heap_min": 40256,
+  "reset_reason": "Software/System restart", "last_error": ""
 }
 ```
 
-### Change Chart Colors
+Legacy payloads (`temperature`/`rssi`/`boot_count`/`fails` only) are still accepted.
 
-Edit the Chart.js configuration in `index.html`:
+### Response contract
 
-```javascript
-borderColor: '#667eea',  // Change line color
-backgroundColor: 'rgba(102, 126, 234, 0.1)',  // Change fill color
+The firmware validates the **body**, not just the status code:
+
+| Server response | Firmware interprets as |
+|---|---|
+| `200` + body containing `ok` / `success` / empty body | ✅ Success |
+| Body containing `error` | ❌ Failure → exponential backoff |
+
+## Reliability Design
+
+| Mechanism | What it prevents |
+|---|---|
+| Non-blocking WiFi state machine | Dead device during reconnects; OTA/web always reachable |
+| Exponential backoff (WiFi + uploads) | Connection storms, hammering a down server |
+| Reboot after 20 consecutive failures | Unrecoverable stuck states on an unattended device |
+| Low-heap guard (8 KB) | Crashes from heap fragmentation |
+| Scheduled 24 h reboot | Long-term drift of any kind |
+| 32× ADC averaging | ESP8266 ADC noise (±3–5 LSB) |
+| Spike persistence filter | Single-sample glitches corrupting data |
+| RTC-memory counters | Flash wear — **zero** routine EEPROM writes |
+| Watchdog feeding in all long ops | Hardware WDT resets during HTTP/OTA/ADC work |
+| `millis()` unsigned-subtraction timing | Correct behavior across the 49.7-day overflow |
+
+## Calibration
+
+> ⚠️ **Known TODO:** the current `CAL_OFFSET = -8.0` is a rough empirical value and
+> readings may run high (e.g., ~50 °C at room temperature). Validate against a real
+> thermometer before trusting absolute values.
+
+To recalibrate:
+
+1. Place a reference thermometer next to the sensor; wait 10 minutes.
+2. Read the raw value from the device dashboard: `raw = displayed − CAL_OFFSET`.
+3. Set `CAL_OFFSET = real_temperature − raw` in the firmware and reflash.
+
+If the error is very large (> 15 °C), first check that the series resistor is really
+10 kΩ and that the thermistor isn't thermally coupled to the ESP8266 or its voltage
+regulator (self-heating inside a sealed enclosure is a common cause).
+
+## Security Notes
+
+This project assumes a **trusted, isolated IoT network**. Be aware:
+
+| Item | Status | Mitigation |
+|---|---|---|
+| OTA updates | **No password** (simplicity) | Keep the node on an isolated VLAN, or re-enable `setPasswordHash()` |
+| Telemetry transport | Plain HTTP by default | Set `USE_HTTPS 1` + certificate fingerprint |
+| Ingest endpoint | Open by default | Set `DEVICE_KEY` in `config.php` and send `X-Device-Key` from firmware |
+| Device `/reset` | Unauthenticated | Network-level isolation |
+| SQLite file | Protected by `.htaccess` (Apache) | Verify with `curl -I`; Nginx users must add a deny rule |
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Node never appears on server | Check `SERVER_URL`; `curl` the endpoint manually; check server error log |
+| `{"status":"error","message":"invalid json"}` | Firmware/server mismatch — compare payload with `docs/API_DOCUMENTATION.md` |
+| Temperature reads ~50 °C at room temp | See [Calibration](#calibration); check for self-heating / wrong resistor |
+| `database is locked` in PHP | WAL not active or `data/` on a network FS — use local disk |
+| DB file downloadable via URL | `.htaccess` ignored (Nginx?) — add a deny rule or move DB outside web root |
+| Compile error: IRAM 92% used | **Normal** — the WiFi stack reserves IRAM. Compiles and runs fine |
+| Counters reset to 1 after power cut | Expected — RTC memory doesn't survive power loss (by design, to save flash) |
+| Uploads fail with `transport -11` | Server/DNS timeout — check network; backoff will retry automatically |
+
+## Roadmap
+
+- [ ] Validate temperature calibration against reference thermometer
+- [ ] Re-enable OTA password hash (or VLAN-only access)
+- [ ] Optional daily EEPROM snapshot for power-loss-persistent statistics
+- [ ] BME280 support (temperature + humidity + pressure)
+- [ ] Deep-sleep battery variant
+- [ ] Server-side alerting (email/webhook on offline devices)
+
+## License
+
+[MIT](LICENSE) — do whatever, no warranty. Built for my own shed; shared in case it helps yours.
 ```
-
-## 📝 Notes
-
-- ESP8266 connects to WiFi only when sending data (hourly)
-- Takes temperature samples every 5 minutes
-- Sends 30 minutes of data (6 samples) every hour
-- Dashboard auto-refreshes every 5 minutes
-- Data persists across server restarts
-
-## 🔒 Security Recommendations
-
-For production use:
-1. Use HTTPS instead of HTTP
-2. Add authentication to API endpoints
-3. Implement rate limiting
-4. Store data in a proper database
-5. Add input validation and sanitization
-6. Regular backups of temperature_data.json

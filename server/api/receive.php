@@ -1,202 +1,390 @@
 <?php
-/**
- * Receive temperature data from ESP8266
- * 
- * Supports both legacy payload (schema v0) and new schema v1 payload.
- * 
- * Legacy payload: {"temperature":21.45,"rssi":-61,"boot_count":12,"fails":0}
- * Schema v1 payload: Full telemetry with device identity, wifi stats, etc.
- * 
- * Response contract (CRITICAL):
- * - HTTP 200 + body with "ok", "success", or {"status":"ok"} → SUCCESS
- * - Body containing "error" → FAILURE (device backs off)
- * - Always respond with JSON, never include "error" on success
+
+/*
+ * ESP8266 ingest endpoint.
+ *
+ * Firmware expects:
+ * - HTTP 200 and body containing "ok" on success
+ * - body containing "error" on failure
  */
 
-require_once __DIR__ . '/includes/db.php';
-require_once __DIR__ . '/includes/functions.php';
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
 
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-Device-Key');
+require_once __DIR__ . '/../includes/functions.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+header('Content-Type: application/json; charset=utf-8');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['status' => 'error', 'message' => 'Method not allowed']);
-    exit();
-}
+function str_clean(array $d, string $key, int $max = 64, string $default = ''): string
+{
+    $v = array_key_exists($key, $d) && is_scalar($d[$key])
+        ? (string)$d[$key]
+        : $default;
 
-// Optional: Check shared secret if configured
-if (DEVICE_SECRET_KEY !== '') {
-    $providedKey = $_SERVER['HTTP_X_DEVICE_KEY'] ?? '';
-    if ($providedKey !== DEVICE_SECRET_KEY) {
-        http_response_code(401);
-        echo json_encode(['status' => 'error', 'message' => 'Invalid device key']);
-        exit();
+    $v = trim(preg_replace('/[\x00-\x1F\x7F]/', ' ', $v));
+
+    if (strlen($v) > $max) {
+        $v = substr($v, 0, $max);
     }
+
+    return $v;
 }
 
-// Read and decode JSON body
-$input = file_get_contents('php://input');
-$data = json_decode($input, true);
+function int_clean(array $d, string $key, ?int $min = null, ?int $max = null, $default = null)
+{
+    if (!isset($d[$key]) || !is_numeric($d[$key])) {
+        return $default;
+    }
 
-if (!is_array($data)) {
-    http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Invalid JSON']);
-    exit();
+    $v = (int)$d[$key];
+
+    if ($min !== null && $v < $min) {
+        $v = $min;
+    }
+
+    if ($max !== null && $v > $max) {
+        $v = $max;
+    }
+
+    return $v;
+}
+
+function float_clean(array $d, string $key, ?float $min = null, ?float $max = null, $default = null)
+{
+    if (!isset($d[$key]) || !is_numeric($d[$key])) {
+        return $default;
+    }
+
+    $v = (float)$d[$key];
+
+    if ($min !== null && $v < $min) {
+        $v = $min;
+    }
+
+    if ($max !== null && $v > $max) {
+        $v = $max;
+    }
+
+    return $v;
 }
 
 try {
-    $db = getDb();
-    initSchema(); // Ensure tables exist
-    
-    // Detect payload version
-    $isV1 = isset($data['schema']) && $data['schema'] === 1;
-    
-    // Determine chip_id (primary device key)
-    $chipId = 'LEGACY';
-    if ($isV1 && !empty($data['chip_id'])) {
-        $chipId = truncateString((string)$data['chip_id'], 16);
-    } elseif (!empty($data['mac'])) {
-        // Try to derive from MAC for legacy devices
-        $chipId = 'MAC_' . strtoupper(str_replace(':', '', (string)$data['mac']));
-        $chipId = substr($chipId, 0, 16);
-    }
-    
-    // Sanitize common fields
-    $tempC = sanitizeTemperature($data['temperature'] ?? $data['temp_c'] ?? null);
-    $rssi = sanitizeRssi($data['rssi'] ?? null);
-    
-    if ($tempC === null) {
+    $raw = file_get_contents('php://input');
+
+    if ($raw === false || strlen($raw) > 20000) {
         http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Missing temperature']);
-        exit();
-    }
-    
-    $db->beginTransaction();
-    
-    // Upsert devices table (only for v1 or when we have device info)
-    if ($isV1) {
-        $stmt = $db->prepare('
-            INSERT INTO devices (
-                chip_id, mac, device_name, fw, sdk, ip, last_seen, last_temp, last_rssi,
-                boot_count, wifi_reconnects, ota_updates, heap_min, reset_reason, last_error
-            ) VALUES (
-                :chip_id, :mac, :device_name, :fw, :sdk, :ip, :last_seen, :last_temp, :last_rssi,
-                :boot_count, :wifi_reconnects, :ota_updates, :heap_min, :reset_reason, :last_error
-            )
-            ON DUPLICATE KEY UPDATE
-                mac = VALUES(mac),
-                device_name = VALUES(device_name),
-                fw = VALUES(fw),
-                sdk = VALUES(sdk),
-                ip = VALUES(ip),
-                last_seen = VALUES(last_seen),
-                last_temp = VALUES(last_temp),
-                last_rssi = VALUES(last_rssi),
-                boot_count = VALUES(boot_count),
-                wifi_reconnects = VALUES(wifi_reconnects),
-                ota_updates = VALUES(ota_updates),
-                heap_min = VALUES(heap_min),
-                reset_reason = VALUES(reset_reason),
-                last_error = VALUES(last_error)
-        ');
-        
-        $stmt->execute([
-            ':chip_id'         => $chipId,
-            ':mac'             => !empty($data['mac']) ? truncateString((string)$data['mac'], 17) : null,
-            ':device_name'     => !empty($data['device']) ? truncateString((string)$data['device'], 64) : null,
-            ':fw'              => !empty($data['fw']) ? truncateString((string)$data['fw'], 32) : null,
-            ':sdk'             => !empty($data['sdk']) ? truncateString((string)$data['sdk'], 64) : null,
-            ':ip'              => !empty($data['ip']) ? truncateString((string)$data['ip'], 45) : null,
-            ':last_seen'       => date('Y-m-d H:i:s'),
-            ':last_temp'       => $tempC,
-            ':last_rssi'       => $rssi,
-            ':boot_count'      => safeInt($data['boot_count'] ?? 0),
-            ':wifi_reconnects' => safeInt($data['wifi_reconnects'] ?? 0),
-            ':ota_updates'     => safeInt($data['ota_updates'] ?? 0),
-            ':heap_min'        => safeInt($data['heap_min'] ?? null),
-            ':reset_reason'    => !empty($data['reset_reason']) ? truncateString((string)$data['reset_reason'], 64) : null,
-            ':last_error'      => !empty($data['last_error']) ? truncateString((string)$data['last_error'], 160) : null,
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'invalid request body',
         ]);
-    } else {
-        // Legacy payload - update minimal device info
-        $stmt = $db->prepare('
-            INSERT INTO devices (chip_id, last_seen, last_temp, last_rssi, boot_count)
-            VALUES (:chip_id, :last_seen, :last_temp, :last_rssi, :boot_count)
-            ON DUPLICATE KEY UPDATE
-                last_seen = VALUES(last_seen),
-                last_temp = VALUES(last_temp),
-                last_rssi = VALUES(last_rssi),
-                boot_count = VALUES(boot_count)
-        ');
-        
-        $stmt->execute([
-            ':chip_id'     => $chipId,
-            ':last_seen'   => date('Y-m-d H:i:s'),
-            ':last_temp'   => $tempC,
-            ':last_rssi'   => $rssi,
-            ':boot_count'  => safeInt($data['boot_count'] ?? 0),
-        ]);
+        exit;
     }
-    
-    // Insert reading
-    $rawJson = $isV1 ? json_encode($data, JSON_UNESCAPED_SLASHES) : null;
-    
-    $stmt = $db->prepare('
-        INSERT INTO readings (
-            chip_id, temp_c, rssi, channel, bssid, wifi_state, adc_raw, spike_rejects,
-            consec_fails, total_uploads, ok_uploads, fail_uploads, heap, heap_min,
-            uptime_s, reset_reason, last_error, raw_json
+
+    if (DEVICE_KEY !== '') {
+        $sentKey = $_SERVER['HTTP_X_DEVICE_KEY'] ?? '';
+
+        if (!hash_equals(DEVICE_KEY, $sentKey)) {
+            http_response_code(403);
+            echo json_encode([
+                'status' => 'error',
+                'message' => 'unauthorized',
+            ]);
+            exit;
+        }
+    }
+
+    $d = json_decode($raw, true);
+
+    if (!is_array($d)) {
+        http_response_code(400);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'invalid json',
+        ]);
+        exit;
+    }
+
+    /*
+     * Device identity.
+     * New firmware sends chip_id.
+     * Legacy firmware does not, so derive a stable fallback ID.
+     */
+    $chipRaw = trim((string)($d['chip_id'] ?? ''));
+
+    if ($chipRaw === '') {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $chipRaw = 'legacy-' . substr(md5($ip), 0, 10);
+    }
+
+    $chip = preg_replace('/[^A-Za-z0-9:_-]/', '', $chipRaw);
+
+    if (strlen($chip) > 32) {
+        $chip = substr($chip, 0, 32);
+    }
+
+    if ($chip === '') {
+        $chip = 'unknown';
+    }
+
+    /*
+     * Temperature:
+     * new payload uses temp_c, old payload uses temperature.
+     */
+    $temp = null;
+
+    if (isset($d['temp_c']) && is_numeric($d['temp_c'])) {
+        $temp = (float)$d['temp_c'];
+    } elseif (isset($d['temperature']) && is_numeric($d['temperature'])) {
+        $temp = (float)$d['temperature'];
+    }
+
+    if ($temp !== null) {
+        if ($temp < -60) {
+            $temp = -60;
+        }
+
+        if ($temp > 150) {
+            $temp = 150;
+        }
+    }
+
+    $rssi = int_clean($d, 'rssi', -120, 0, null);
+
+    $mac = strtoupper(str_clean($d, 'mac', 17, ''));
+    $deviceName = str_clean($d, 'device', 64, '');
+    $fw = str_clean($d, 'fw', 32, '');
+    $sdk = str_clean($d, 'sdk', 64, '');
+    $ip = str_clean($d, 'ip', 45, $_SERVER['REMOTE_ADDR'] ?? '');
+
+    $channel = int_clean($d, 'channel', 0, 255, null);
+    $bssid = strtoupper(str_clean($d, 'bssid', 17, ''));
+    $wifiState = str_clean($d, 'wifi_state', 16, '');
+
+    $adcRaw = int_clean($d, 'adc_raw', 0, 1023, null);
+    $spikeRejects = int_clean($d, 'spike_rejects', 0, null, null);
+
+    $bootCount = int_clean($d, 'boot_count', 0, null, null);
+    $wifiReconnects = int_clean($d, 'wifi_reconnects', 0, null, null);
+    $otaUpdates = int_clean($d, 'ota_updates', 0, null, null);
+
+    $totalUploads = int_clean($d, 'total_uploads', 0, null, null);
+    $okUploads = int_clean($d, 'ok_uploads', 0, null, null);
+    $failUploads = int_clean($d, 'fail_uploads', 0, null, null);
+
+    $consecFails = int_clean($d, 'consec_fails', 0, null, null);
+
+    if ($consecFails === null) {
+        // Legacy field
+        $consecFails = int_clean($d, 'fails', 0, null, null);
+    }
+
+    $heap = int_clean($d, 'heap', 0, null, null);
+    $heapMin = int_clean($d, 'heap_min', 0, null, null);
+
+    $uptime = int_clean($d, 'uptime_s', 0, null, null);
+
+    $resetReason = str_clean($d, 'reset_reason', 64, '');
+    $lastError = str_clean($d, 'last_error', 160, '');
+
+    $now = gmdate('Y-m-d H:i:s');
+
+    $pdo = db();
+
+    /*
+     * Upsert device.
+     * SQLite 3.24+ required for ON CONFLICT.
+     */
+    $deviceSql = '
+        INSERT INTO devices (
+            chip_id,
+            mac,
+            device_name,
+            fw,
+            sdk,
+            ip,
+            last_seen,
+            last_temp,
+            last_rssi,
+            last_heap,
+            heap_min,
+            boot_count,
+            wifi_reconnects,
+            ota_updates,
+            total_uploads,
+            ok_uploads,
+            fail_uploads,
+            wifi_state,
+            last_consec_fails,
+            reset_reason,
+            last_error
         ) VALUES (
-            :chip_id, :temp_c, :rssi, :channel, :bssid, :wifi_state, :adc_raw, :spike_rejects,
-            :consec_fails, :total_uploads, :ok_uploads, :fail_uploads, :heap, :heap_min,
-            :uptime_s, :reset_reason, :last_error, :raw_json
+            :chip_id,
+            :mac,
+            :device_name,
+            :fw,
+            :sdk,
+            :ip,
+            :last_seen,
+            :last_temp,
+            :last_rssi,
+            :last_heap,
+            :heap_min,
+            :boot_count,
+            :wifi_reconnects,
+            :ota_updates,
+            :total_uploads,
+            :ok_uploads,
+            :fail_uploads,
+            :wifi_state,
+            :last_consec_fails,
+            :reset_reason,
+            :last_error
         )
-    ');
-    
-    $stmt->execute([
-        ':chip_id'       => $chipId,
-        ':temp_c'        => $tempC,
-        ':rssi'          => $rssi,
-        ':channel'       => isset($data['channel']) ? safeInt($data['channel']) : null,
-        ':bssid'         => !empty($data['bssid']) ? truncateString((string)$data['bssid'], 17) : null,
-        ':wifi_state'    => !empty($data['wifi_state']) ? truncateString((string)$data['wifi_state'], 16) : null,
-        ':adc_raw'       => isset($data['adc_raw']) ? max(0, min(65535, safeInt($data['adc_raw']))) : null,
-        ':spike_rejects' => isset($data['spike_rejects']) ? max(0, safeInt($data['spike_rejects'])) : null,
-        ':consec_fails'  => safeInt($data['consec_fails'] ?? $data['fails'] ?? 0),
-        ':total_uploads' => isset($data['total_uploads']) ? max(0, safeInt($data['total_uploads'])) : null,
-        ':ok_uploads'    => isset($data['ok_uploads']) ? max(0, safeInt($data['ok_uploads'])) : null,
-        ':fail_uploads'  => isset($data['fail_uploads']) ? max(0, safeInt($data['fail_uploads'])) : null,
-        ':heap'          => isset($data['heap']) ? max(0, safeInt($data['heap'])) : null,
-        ':heap_min'      => isset($data['heap_min']) ? max(0, safeInt($data['heap_min'])) : null,
-        ':uptime_s'      => isset($data['uptime_s']) ? max(0, safeInt($data['uptime_s'])) : null,
-        ':reset_reason'  => !empty($data['reset_reason']) ? truncateString((string)$data['reset_reason'], 64) : null,
-        ':last_error'    => !empty($data['last_error']) ? truncateString((string)$data['last_error'], 160) : null,
-        ':raw_json'      => $rawJson,
+        ON CONFLICT(chip_id) DO UPDATE SET
+            mac = COALESCE(NULLIF(excluded.mac, ""), devices.mac),
+            device_name = COALESCE(NULLIF(excluded.device_name, ""), devices.device_name),
+            fw = COALESCE(NULLIF(excluded.fw, ""), devices.fw),
+            sdk = COALESCE(NULLIF(excluded.sdk, ""), devices.sdk),
+            ip = COALESCE(NULLIF(excluded.ip, ""), devices.ip),
+            last_seen = excluded.last_seen,
+            last_temp = COALESCE(excluded.last_temp, devices.last_temp),
+            last_rssi = COALESCE(excluded.last_rssi, devices.last_rssi),
+            last_heap = COALESCE(excluded.last_heap, devices.last_heap),
+            heap_min = COALESCE(excluded.heap_min, devices.heap_min),
+            boot_count = COALESCE(excluded.boot_count, devices.boot_count),
+            wifi_reconnects = COALESCE(excluded.wifi_reconnects, devices.wifi_reconnects),
+            ota_updates = COALESCE(excluded.ota_updates, devices.ota_updates),
+            total_uploads = COALESCE(excluded.total_uploads, devices.total_uploads),
+            ok_uploads = COALESCE(excluded.ok_uploads, devices.ok_uploads),
+            fail_uploads = COALESCE(excluded.fail_uploads, devices.fail_uploads),
+            wifi_state = COALESCE(NULLIF(excluded.wifi_state, ""), devices.wifi_state),
+            last_consec_fails = COALESCE(excluded.last_consec_fails, devices.last_consec_fails),
+            reset_reason = COALESCE(NULLIF(excluded.reset_reason, ""), devices.reset_reason),
+            last_error = excluded.last_error
+    ';
+
+    $deviceStmt = $pdo->prepare($deviceSql);
+
+    $deviceStmt->execute([
+        ':chip_id' => $chip,
+        ':mac' => $mac,
+        ':device_name' => $deviceName,
+        ':fw' => $fw,
+        ':sdk' => $sdk,
+        ':ip' => $ip,
+        ':last_seen' => $now,
+        ':last_temp' => $temp,
+        ':last_rssi' => $rssi,
+        ':last_heap' => $heap,
+        ':heap_min' => $heapMin,
+        ':boot_count' => $bootCount,
+        ':wifi_reconnects' => $wifiReconnects,
+        ':ota_updates' => $otaUpdates,
+        ':total_uploads' => $totalUploads,
+        ':ok_uploads' => $okUploads,
+        ':fail_uploads' => $failUploads,
+        ':wifi_state' => $wifiState,
+        ':last_consec_fails' => $consecFails,
+        ':reset_reason' => $resetReason,
+        ':last_error' => $lastError,
     ]);
-    
-    $readingId = (int)$db->lastInsertId();
-    
-    // Prune old data (retention policy)
-    $db->exec('DELETE FROM readings WHERE ts < NOW() - INTERVAL ' . RETENTION_DAYS . ' DAY');
-    
-    $db->commit();
-    
-    // Success response - MUST contain "ok" or "success", NEVER "error"
-    echo json_encode(['status' => 'ok', 'reading_id' => $readingId]);
-    
-} catch (Throwable $e) {
-    if (isset($db) && $db->inTransaction()) {
-        $db->rollBack();
+
+    /*
+     * Insert reading.
+     */
+    $rawStore = $raw === '' ? null : substr($raw, 0, 8000);
+
+    $readingSql = '
+        INSERT INTO readings (
+            chip_id,
+            ts,
+            temp_c,
+            rssi,
+            channel,
+            bssid,
+            wifi_state,
+            adc_raw,
+            spike_rejects,
+            consec_fails,
+            total_uploads,
+            ok_uploads,
+            fail_uploads,
+            heap,
+            heap_min,
+            uptime_s,
+            reset_reason,
+            last_error,
+            raw_json
+        ) VALUES (
+            :chip_id,
+            :ts,
+            :temp_c,
+            :rssi,
+            :channel,
+            :bssid,
+            :wifi_state,
+            :adc_raw,
+            :spike_rejects,
+            :consec_fails,
+            :total_uploads,
+            :ok_uploads,
+            :fail_uploads,
+            :heap,
+            :heap_min,
+            :uptime_s,
+            :reset_reason,
+            :last_error,
+            :raw_json
+        )
+    ';
+
+    $readingStmt = $pdo->prepare($readingSql);
+
+    $readingStmt->execute([
+        ':chip_id' => $chip,
+        ':ts' => $now,
+        ':temp_c' => $temp,
+        ':rssi' => $rssi,
+        ':channel' => $channel,
+        ':bssid' => $bssid,
+        ':wifi_state' => $wifiState,
+        ':adc_raw' => $adcRaw,
+        ':spike_rejects' => $spikeRejects,
+        ':consec_fails' => $consecFails,
+        ':total_uploads' => $totalUploads,
+        ':ok_uploads' => $okUploads,
+        ':fail_uploads' => $failUploads,
+        ':heap' => $heap,
+        ':heap_min' => $heapMin,
+        ':uptime_s' => $uptime,
+        ':reset_reason' => $resetReason,
+        ':last_error' => $lastError,
+        ':raw_json' => $rawStore,
+    ]);
+
+    $readingId = $pdo->lastInsertId();
+
+    /*
+     * Lightweight automatic cleanup.
+     * Runs randomly on about 1% of requests.
+     */
+    if (mt_rand(1, 100) === 1) {
+        $pdo->exec(
+            "DELETE FROM readings WHERE ts < datetime('now', '-" . (int)RETENTION_DAYS . " day')"
+        );
     }
-    
+
+    echo json_encode([
+        'status' => 'ok',
+        'reading_id' => (int)$readingId,
+    ]);
+} catch (Throwable $e) {
+    error_log('receive.php error: ' . $e->getMessage());
+
     http_response_code(500);
-    echo json_encode(['status' => 'error', 'message' => 'db failure']);
+
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'server error',
+    ]);
 }

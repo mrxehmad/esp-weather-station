@@ -1,200 +1,297 @@
 <?php
-/**
- * Device detail page - WordPress 2020 admin style
- */
 
-require_once __DIR__ . '/api/includes/db.php';
-require_once __DIR__ . '/api/includes/functions.php';
+require_once __DIR__ . '/includes/functions.php';
 
-$pageTitle = 'Device Details';
-$currentPage = 'devices';
+$pdo = db();
 
-$chipId = $_GET['chip'] ?? '';
+$chip = $_GET['chip'] ?? '';
 
-if (empty($chipId)) {
+if ($chip === '') {
     header('Location: devices.php');
     exit;
 }
 
-try {
-    $db = getDb();
-    
-    // Get device info
-    $stmt = $db->prepare('SELECT * FROM devices WHERE chip_id = :chip_id');
-    $stmt->execute([':chip_id' => $chipId]);
-    $device = $stmt->fetch();
-    
-    if (!$device) {
-        header('Location: devices.php');
-        exit;
-    }
-    
-    // Get latest reading with raw JSON
-    $stmt = $db->prepare('SELECT * FROM readings WHERE chip_id = :chip_id ORDER BY ts DESC LIMIT 1');
-    $stmt->execute([':chip_id' => $chipId]);
-    $latestReading = $stmt->fetch();
-    
-    // Get 7 days of data for charts
-    $stmt = $db->prepare("
-        SELECT temp_c, rssi, heap, heap_min, ts 
-        FROM readings 
-        WHERE chip_id = :chip_id 
-        AND ts > DATE_SUB(NOW(), INTERVAL 7 DAY)
+$stmt = $pdo->prepare('SELECT * FROM devices WHERE chip_id = ?');
+$stmt->execute([$chip]);
+$device = $stmt->fetch() ?: null;
+
+$pageTitle = $device ? display_device_name($device) : 'Device not found';
+
+$latest = null;
+$rows = [];
+
+if ($device) {
+    $stmt = $pdo->prepare('
+        SELECT *
+        FROM readings
+        WHERE chip_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+    ');
+    $stmt->execute([$device['chip_id']]);
+    $latest = $stmt->fetch() ?: null;
+
+    $stmt = $pdo->prepare("
+        SELECT ts, temp_c, rssi, heap
+        FROM readings
+        WHERE chip_id = ?
+          AND ts >= datetime('now', '-7 day')
         ORDER BY ts ASC
+        LIMIT 2000
     ");
-    $stmt->execute([':chip_id' => $chipId]);
-    $chartData = $stmt->fetchAll();
-    
-    // Calculate stats
-    $totalUploads = $latestReading['total_uploads'] ?? 0;
-    $okUploads = $latestReading['ok_uploads'] ?? 0;
-    $failUploads = $latestReading['fail_uploads'] ?? 0;
-    $uploadRate = $totalUploads > 0 ? round(($okUploads / $totalUploads) * 100, 1) : 0;
-    
-} catch (Throwable $e) {
-    $error = $e->getMessage();
+    $stmt->execute([$device['chip_id']]);
+    $rows = $stmt->fetchAll();
 }
 
-include __DIR__ . '/api/includes/header.php';
+include __DIR__ . '/includes/header.php';
+
 ?>
 
-<div class="wrap">
-    <h1>
-        <a href="devices.php" style="text-decoration:none;">←</a>
-        Device: <?php echo e($device['chip_id']); ?>
-    </h1>
-    
-    <?php if (isset($error)): ?>
-        <div class="alert-row alert-danger">
-            <div class="alert-message">Database error: <?php echo e($error); ?></div>
+<?php if (!$device): ?>
+
+    <div class="alert-item danger">
+        Device not found.
+    </div>
+
+<?php else: ?>
+
+    <?php $status = device_status($device); ?>
+
+    <div class="cards">
+        <div class="card">
+            <div class="label">Status</div>
+            <div class="value"><?php echo e($status['label']); ?></div>
+            <div class="sub">
+                Last seen <?php echo e(ago($device['last_seen'])); ?>
+            </div>
         </div>
-    <?php else: ?>
-    
-    <!-- Identity Card -->
+
+        <div class="card">
+            <div class="label">Temperature</div>
+            <div class="value">
+                <?php
+                $temp = $latest['temp_c'] ?? $device['last_temp'];
+                echo $temp !== null ? e(number_format((float)$temp, 1) . ' °C') : '—';
+                ?>
+            </div>
+            <div class="sub">
+                ADC raw: <?php echo e((string)($latest['adc_raw'] ?? '—')); ?>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">Heap</div>
+            <div class="value"><?php echo e(format_bytes($latest['heap'] ?? $device['last_heap'])); ?></div>
+            <div class="sub">
+                Min: <?php echo e(format_bytes($device['heap_min'])); ?>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">Uptime</div>
+            <div class="value" style="font-size:22px;">
+                <?php echo e(format_uptime($latest['uptime_s'] ?? null)); ?>
+            </div>
+            <div class="sub">
+                Device reboots every 24h by design
+            </div>
+        </div>
+    </div>
+
     <div class="card">
-        <div class="card-title">Device Identity</div>
-        <table style="width:100%;border-collapse:collapse;">
-            <tr>
-                <td style="padding:8px;font-weight:600;width:150px;">Chip ID:</td>
-                <td style="padding:8px;"><?php echo e($device['chip_id']); ?></td>
-                <td style="padding:8px;font-weight:600;width:150px;">MAC:</td>
-                <td style="padding:8px;"><?php echo e($device['mac'] ?? '-'); ?></td>
-            </tr>
-            <tr>
-                <td style="padding:8px;font-weight:600;">IP Address:</td>
-                <td style="padding:8px;"><?php echo e($device['ip'] ?? '-'); ?></td>
-                <td style="padding:8px;font-weight:600;">Channel:</td>
-                <td style="padding:8px;"><?php echo $latestReading['channel'] ?? '-'; ?></td>
-            </tr>
-            <tr>
-                <td style="padding:8px;font-weight:600;">Firmware:</td>
-                <td style="padding:8px;"><?php echo e($device['fw'] ?? '-'); ?></td>
-                <td style="padding:8px;font-weight:600;">SDK:</td>
-                <td style="padding:8px;"><?php echo e($device['sdk'] ?? '-'); ?></td>
-            </tr>
-            <tr>
-                <td style="padding:8px;font-weight:600;">BSSID:</td>
-                <td style="padding:8px;"><?php echo e($latestReading['bssid'] ?? '-'); ?></td>
-                <td style="padding:8px;font-weight:600;">WiFi State:</td>
-                <td style="padding:8px;"><?php echo e($latestReading['wifi_state'] ?? '-'); ?></td>
-            </tr>
-            <tr>
-                <td style="padding:8px;font-weight:600;">Reset Reason:</td>
-                <td style="padding:8px;" colspan="3"><?php echo e($device['reset_reason'] ?? '-'); ?></td>
-            </tr>
+        <div class="label">Device information</div>
+
+        <table class="list">
+            <tbody>
+                <tr>
+                    <th style="width:220px;">Chip ID</th>
+                    <td><?php echo e($device['chip_id']); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Device name</th>
+                    <td><?php echo e($device['device_name'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>MAC</th>
+                    <td><?php echo e($device['mac'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>IP</th>
+                    <td><?php echo e($device['ip'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Firmware</th>
+                    <td><?php echo e($device['fw'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>SDK</th>
+                    <td><?php echo e($device['sdk'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>WiFi state</th>
+                    <td><?php echo e($device['wifi_state'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Channel</th>
+                    <td><?php echo e((string)($latest['channel'] ?? '—')); ?></td>
+                </tr>
+
+                <tr>
+                    <th>BSSID</th>
+                    <td><?php echo e($latest['bssid'] ?? '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>RSSI</th>
+                    <td>
+                        <?php echo $device['last_rssi'] !== null ? e((int)$device['last_rssi'] . ' dBm') : '—'; ?>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th>Boot count</th>
+                    <td><?php echo e((string)(int)($device['boot_count'] ?? 0)); ?></td>
+                </tr>
+
+                <tr>
+                    <th>WiFi reconnects</th>
+                    <td><?php echo e((string)(int)($device['wifi_reconnects'] ?? 0)); ?></td>
+                </tr>
+
+                <tr>
+                    <th>OTA updates</th>
+                    <td><?php echo e((string)(int)($device['ota_updates'] ?? 0)); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Uploads OK / Total</th>
+                    <td>
+                        <?php
+                        $ok = (int)($device['ok_uploads'] ?? 0);
+                        $total = (int)($device['total_uploads'] ?? 0);
+                        echo e($total > 0 ? $ok . ' / ' . $total : '—');
+                        ?>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th>Consecutive fails</th>
+                    <td><?php echo e((string)(int)($device['last_consec_fails'] ?? 0)); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Spike rejects</th>
+                    <td><?php echo e((string)($latest['spike_rejects'] ?? 0)); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Reset reason</th>
+                    <td><?php echo e($device['reset_reason'] ?: '—'); ?></td>
+                </tr>
+
+                <tr>
+                    <th>Last error</th>
+                    <td><?php echo e($device['last_error'] ?: '—'); ?></td>
+                </tr>
+            </tbody>
         </table>
     </div>
-    
-    <!-- Stat Cards -->
-    <div class="stat-cards">
-        <div class="stat-card">
-            <div class="stat-label">Total Uploads</div>
-            <div class="stat-value"><?php echo number_format($totalUploads); ?></div>
+
+    <div class="chart-grid">
+        <div class="card chart-card">
+            <div class="label">Temperature — last 7 days</div>
+            <div class="chart-wrap">
+                <canvas id="tempChart"></canvas>
+            </div>
         </div>
-        <div class="stat-card">
-            <div class="stat-label">Successful</div>
-            <div class="stat-value text-success"><?php echo number_format($okUploads); ?></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Failed</div>
-            <div class="stat-value text-danger"><?php echo number_format($failUploads); ?></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Success Rate</div>
-            <div class="stat-value"><?php echo $uploadRate; ?>%</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">OTA Updates</div>
-            <div class="stat-value"><?php echo $device['ota_updates'] ?? '0'; ?></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Spike Rejects</div>
-            <div class="stat-value"><?php echo $latestReading['spike_rejects'] ?? '0'; ?></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Uptime</div>
-            <div class="stat-value"><?php echo $latestReading['uptime_s'] ? floor($latestReading['uptime_s'] / 3600) . 'h ' . floor(($latestReading['uptime_s'] % 3600) / 60) . 'm' : '-'; ?></div>
+
+        <div class="card chart-card">
+            <div class="label">RSSI — last 7 days</div>
+            <div class="chart-wrap">
+                <canvas id="rssiChart"></canvas>
+            </div>
         </div>
     </div>
-    
-    <!-- Temperature Chart -->
-    <div class="card">
-        <div class="card-title">Temperature - Last 7 Days</div>
-        <div class="chart-container">
-            <canvas id="tempChart"></canvas>
-        </div>
-    </div>
-    
-    <!-- RSSI Chart -->
-    <div class="card">
-        <div class="card-title">RSSI - Last 7 Days</div>
-        <div class="chart-container small">
-            <canvas id="rssiChart"></canvas>
-        </div>
-    </div>
-    
-    <!-- Heap Chart -->
-    <div class="card">
-        <div class="card-title">Free Heap Memory - Last 7 Days</div>
-        <div class="chart-container small">
+
+    <div class="card chart-card">
+        <div class="label">Heap — last 7 days</div>
+        <div class="chart-wrap">
             <canvas id="heapChart"></canvas>
         </div>
     </div>
-    
-    <!-- Raw JSON -->
-    <?php if ($latestReading && !empty($latestReading['raw_json'])): ?>
-    <div class="card">
-        <div class="card-title">Latest Raw JSON Payload</div>
-        <pre><code><?php 
-            $json = json_decode($latestReading['raw_json'], true);
-            echo e(json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); 
-        ?></code></pre>
-    </div>
-    <?php endif; ?>
-    
-    <?php endif; ?>
-</div>
 
+    <?php if (!empty($latest['raw_json'])): ?>
+        <div class="card">
+            <div class="label">Latest raw payload</div>
+            <pre><?php echo e($latest['raw_json']); ?></pre>
+        </div>
+    <?php endif; ?>
+
+    <?php
+
+    $inlineScripts = '';
+
+    if (!empty($rows)) {
+        $labels = [];
+        $temps = [];
+        $rssis = [];
+        $heaps = [];
+
+        foreach ($rows as $r) {
+            $labels[] = $r['ts'];
+            $temps[] = $r['temp_c'] !== null ? (float)$r['temp_c'] : null;
+            $rssis[] = $r['rssi'] !== null ? (int)$r['rssi'] : null;
+            $heaps[] = $r['heap'] !== null ? (int)$r['heap'] : null;
+        }
+
+        $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
+
+        $labelsJson = json_encode($labels, $jsonFlags);
+        $tempsJson = json_encode($temps, $jsonFlags);
+        $rssisJson = json_encode($rssis, $jsonFlags);
+        $heapsJson = json_encode($heaps, $jsonFlags);
+
+        $inlineScripts = <<<HTML
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    <?php if (!empty($chartData)): ?>
-    const labels = [];
-    const tempData = [];
-    const rssiData = [];
-    const heapData = [];
-    
-    <?php foreach ($chartData as $row): ?>
-    labels.push('<?php echo e(formatChartLabel($row['ts'], true)); ?>');
-    tempData.push(<?php echo (float)$row['temp_c']; ?>);
-    rssiData.push(<?php echo (int)($row['rssi'] ?? 0); ?>);
-    heapData.push(<?php echo (int)($row['heap'] ?? $row['heap_min'] ?? 0); ?>);
-    <?php endforeach; ?>
-    
-    createTempChart('tempChart', labels, tempData);
-    createRssiChart('rssiChart', labels, rssiData);
-    createHeapChart('heapChart', labels, heapData);
-    <?php endif; ?>
-});
-</script>
+makeChart('tempChart', $labelsJson, [{
+    label: 'Temperature °C',
+    data: $tempsJson,
+    borderColor: '#0073aa',
+    backgroundColor: 'rgba(0,115,170,0.08)',
+    fill: true,
+    tension: 0.25
+}], '°C');
 
-<?php include __DIR__ . '/api/includes/footer.php'; ?>
+makeChart('rssiChart', $labelsJson, [{
+    label: 'RSSI dBm',
+    data: $rssisJson,
+    borderColor: '#72777c',
+    backgroundColor: 'rgba(114,119,124,0.08)',
+    fill: true,
+    tension: 0.25
+}], 'dBm');
+
+makeChart('heapChart', $labelsJson, [{
+    label: 'Free heap bytes',
+    data: $heapsJson,
+    borderColor: '#46b450',
+    backgroundColor: 'rgba(70,180,80,0.08)',
+    fill: true,
+    tension: 0.25
+}], 'bytes');
+</script>
+HTML;
+    }
+
+    ?>
+
+<?php endif; ?>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>

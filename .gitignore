@@ -10,6 +10,7 @@ build/
 # Dependencies
 vendor/
 node_modules/
+/data/tempstation.sqlite3
 
 # Logs and temp files
 *.log
