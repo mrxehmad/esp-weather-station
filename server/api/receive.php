@@ -1,12 +1,10 @@
 <?php
 /**
  * Receive temperature data from ESP8266
- * 
+ *
  * Supports both legacy payload (schema v0) and new schema v1 payload.
- * 
- * Legacy payload: {"temperature":21.45,"rssi":-61,"boot_count":12,"fails":0}
- * Schema v1 payload: Full telemetry with device identity, wifi stats, etc.
- * 
+ * Uses SQLite database.
+ *
  * Response contract (CRITICAL):
  * - HTTP 200 + body with "ok", "success", or {"status":"ok"} → SUCCESS
  * - Body containing "error" → FAILURE (device backs off)
@@ -55,10 +53,10 @@ if (!is_array($data)) {
 try {
     $db = getDb();
     initSchema(); // Ensure tables exist
-    
+
     // Detect payload version
     $isV1 = isset($data['schema']) && $data['schema'] === 1;
-    
+
     // Determine chip_id (primary device key)
     $chipId = 'LEGACY';
     if ($isV1 && !empty($data['chip_id'])) {
@@ -68,46 +66,57 @@ try {
         $chipId = 'MAC_' . strtoupper(str_replace(':', '', (string)$data['mac']));
         $chipId = substr($chipId, 0, 16);
     }
-    
+
     // Sanitize common fields
     $tempC = sanitizeTemperature($data['temperature'] ?? $data['temp_c'] ?? null);
     $rssi = sanitizeRssi($data['rssi'] ?? null);
-    
+
     if ($tempC === null) {
         http_response_code(400);
         echo json_encode(['status' => 'error', 'message' => 'Missing temperature']);
         exit();
     }
-    
+
     $db->beginTransaction();
-    
-    // Upsert devices table (only for v1 or when we have device info)
+
+    // Upsert devices table (SQLite uses INSERT OR REPLACE)
     if ($isV1) {
-        $stmt = $db->prepare('
-            INSERT INTO devices (
-                chip_id, mac, device_name, fw, sdk, ip, last_seen, last_temp, last_rssi,
-                boot_count, wifi_reconnects, ota_updates, heap_min, reset_reason, last_error
-            ) VALUES (
-                :chip_id, :mac, :device_name, :fw, :sdk, :ip, :last_seen, :last_temp, :last_rssi,
-                :boot_count, :wifi_reconnects, :ota_updates, :heap_min, :reset_reason, :last_error
-            )
-            ON DUPLICATE KEY UPDATE
-                mac = VALUES(mac),
-                device_name = VALUES(device_name),
-                fw = VALUES(fw),
-                sdk = VALUES(sdk),
-                ip = VALUES(ip),
-                last_seen = VALUES(last_seen),
-                last_temp = VALUES(last_temp),
-                last_rssi = VALUES(last_rssi),
-                boot_count = VALUES(boot_count),
-                wifi_reconnects = VALUES(wifi_reconnects),
-                ota_updates = VALUES(ota_updates),
-                heap_min = VALUES(heap_min),
-                reset_reason = VALUES(reset_reason),
-                last_error = VALUES(last_error)
-        ');
-        
+        // First check if device exists
+        $stmt = $db->prepare('SELECT id FROM devices WHERE chip_id = :chip_id');
+        $stmt->execute([':chip_id' => $chipId]);
+        $exists = $stmt->fetchColumn();
+
+        if ($exists) {
+            $stmt = $db->prepare('
+                UPDATE devices SET
+                    mac = :mac,
+                    device_name = :device_name,
+                    fw = :fw,
+                    sdk = :sdk,
+                    ip = :ip,
+                    last_seen = :last_seen,
+                    last_temp = :last_temp,
+                    last_rssi = :last_rssi,
+                    boot_count = :boot_count,
+                    wifi_reconnects = :wifi_reconnects,
+                    ota_updates = :ota_updates,
+                    heap_min = :heap_min,
+                    reset_reason = :reset_reason,
+                    last_error = :last_error
+                WHERE chip_id = :chip_id
+            ');
+        } else {
+            $stmt = $db->prepare('
+                INSERT INTO devices (
+                    chip_id, mac, device_name, fw, sdk, ip, last_seen, last_temp, last_rssi,
+                    boot_count, wifi_reconnects, ota_updates, heap_min, reset_reason, last_error, created_at
+                ) VALUES (
+                    :chip_id, :mac, :device_name, :fw, :sdk, :ip, :last_seen, :last_temp, :last_rssi,
+                    :boot_count, :wifi_reconnects, :ota_updates, :heap_min, :reset_reason, :last_error, datetime("now")
+                )
+            ');
+        }
+
         $stmt->execute([
             ':chip_id'         => $chipId,
             ':mac'             => !empty($data['mac']) ? truncateString((string)$data['mac'], 17) : null,
@@ -127,16 +136,26 @@ try {
         ]);
     } else {
         // Legacy payload - update minimal device info
-        $stmt = $db->prepare('
-            INSERT INTO devices (chip_id, last_seen, last_temp, last_rssi, boot_count)
-            VALUES (:chip_id, :last_seen, :last_temp, :last_rssi, :boot_count)
-            ON DUPLICATE KEY UPDATE
-                last_seen = VALUES(last_seen),
-                last_temp = VALUES(last_temp),
-                last_rssi = VALUES(last_rssi),
-                boot_count = VALUES(boot_count)
-        ');
-        
+        $stmt = $db->prepare('SELECT id FROM devices WHERE chip_id = :chip_id');
+        $stmt->execute([':chip_id' => $chipId]);
+        $exists = $stmt->fetchColumn();
+
+        if ($exists) {
+            $stmt = $db->prepare('
+                UPDATE devices SET
+                    last_seen = :last_seen,
+                    last_temp = :last_temp,
+                    last_rssi = :last_rssi,
+                    boot_count = :boot_count
+                WHERE chip_id = :chip_id
+            ');
+        } else {
+            $stmt = $db->prepare('
+                INSERT INTO devices (chip_id, last_seen, last_temp, last_rssi, boot_count, created_at)
+                VALUES (:chip_id, :last_seen, :last_temp, :last_rssi, :boot_count, datetime("now"))
+            ');
+        }
+
         $stmt->execute([
             ':chip_id'     => $chipId,
             ':last_seen'   => date('Y-m-d H:i:s'),
@@ -145,10 +164,10 @@ try {
             ':boot_count'  => safeInt($data['boot_count'] ?? 0),
         ]);
     }
-    
+
     // Insert reading
     $rawJson = $isV1 ? json_encode($data, JSON_UNESCAPED_SLASHES) : null;
-    
+
     $stmt = $db->prepare('
         INSERT INTO readings (
             chip_id, temp_c, rssi, channel, bssid, wifi_state, adc_raw, spike_rejects,
@@ -160,7 +179,7 @@ try {
             :uptime_s, :reset_reason, :last_error, :raw_json
         )
     ');
-    
+
     $stmt->execute([
         ':chip_id'       => $chipId,
         ':temp_c'        => $tempC,
@@ -181,22 +200,23 @@ try {
         ':last_error'    => !empty($data['last_error']) ? truncateString((string)$data['last_error'], 160) : null,
         ':raw_json'      => $rawJson,
     ]);
-    
+
     $readingId = (int)$db->lastInsertId();
-    
-    // Prune old data (retention policy)
-    $db->exec('DELETE FROM readings WHERE ts < NOW() - INTERVAL ' . RETENTION_DAYS . ' DAY');
-    
+
+    // Prune old data (retention policy) - SQLite syntax
+    $db->exec('DELETE FROM readings WHERE ts < datetime("now", "-' . RETENTION_DAYS . ' days")');
+
     $db->commit();
-    
+
     // Success response - MUST contain "ok" or "success", NEVER "error"
     echo json_encode(['status' => 'ok', 'reading_id' => $readingId]);
-    
+
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) {
         $db->rollBack();
     }
-    
+
+    error_log("Receive error: " . $e->getMessage());
     http_response_code(500);
     echo json_encode(['status' => 'error', 'message' => 'db failure']);
 }
